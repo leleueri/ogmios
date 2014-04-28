@@ -1,7 +1,4 @@
-package org.ogmios.core.action
-
-import org.ogmios.core.bean.MetricDesc
-import akka.actor.ActorRef
+package org.ogmios.core.bean
 
 /**
  * Licensed under the Apache License, Version 2.0 (the "License");
@@ -16,14 +13,7 @@ import akka.actor.ActorRef
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
-trait Action
 
-case class Register[T](element: T) extends Action
+class Status(val state: String, val msg: String) {
 
-case class RegisterFrom[T](element: T, sender: ActorRef) extends Action
-
-case class AddMetrics(name: String, metrics: List[MetricDesc]) extends Action
-
-case class Read[T](id: String) extends Action
-
-case class ReadFrom[T](id: String, sender: ActorRef) extends Action
+}

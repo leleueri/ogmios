@@ -15,6 +15,9 @@ import scala.util.Success
 import scala.util.Success
 import scala.util.Failure
 import akka.actor.Stash
+import org.ogmios.core.bean.Status
+import org.ogmios.core.action.Read
+import org.ogmios.core.action.ReadFrom
 
 /**
  * Licensed under the Apache License, Version 2.0 (the "License");
@@ -50,15 +53,27 @@ class ProviderActor extends Actor with ActorLogging with ActorNames with ConfigC
       
       context.become(waitResponse(sender))
     }
+    case Read(id: String) => {
+      
+      log.info("read provider " + id)
+      
+      cassandraEndPoint ! new ReadFrom(id, self)
+      
+      context.become(waitResponse(sender))
+    }
   }
   
   def waitResponse(providerClient: ActorRef) : Actor.Receive = {
-      case resp: String => {
+      case resp: Status => {
         providerClient ! resp
         unstashAll()
         context.unbecome
       }
-      
+      case resp: Provider => {
+        providerClient ! resp
+        unstashAll()
+        context.unbecome
+      }
       case any => stash()
       
   }
