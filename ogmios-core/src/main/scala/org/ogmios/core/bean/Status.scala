@@ -14,6 +14,13 @@ package org.ogmios.core.bean
  * limitations under the License.
  */
 
-class Status(val state: String, val msg: String) {
 
+trait Status {
+  def state : String
+  def msg : String
 }
+
+
+case class OpCompleted(val state: String, val msg : String) extends Status
+case class OpFailed(val state: String, val msg : String) extends Status
+case class OpResult[T](val state: String, val msg : String, val value: T) extends Status

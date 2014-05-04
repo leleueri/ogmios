@@ -17,6 +17,4 @@ import java.util.Date
  */
 
 
-class Provider(val id: String, val name: String, val creation: Date, val ref: Option[String]) {
-
-}
+case class Provider(val id: String, val name: String, val creation: Long, val ref: Option[Map[String, String]])

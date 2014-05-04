@@ -1,4 +1,5 @@
 package org.ogmios.core.actor
+
 import scala.util.Success
 import com.datastax.driver.core.{BoundStatement, ResultSet, ResultSetFuture}
 import com.datastax.driver.core.BoundStatement

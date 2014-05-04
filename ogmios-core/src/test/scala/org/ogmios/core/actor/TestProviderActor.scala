@@ -1,19 +1,24 @@
 package org.ogmios.core.actor
 
-import akka.testkit.TestKit
-import akka.testkit.ImplicitSender
-import org.scalatest.WordSpecLike
-import org.scalatest.Matchers
-import org.scalatest.BeforeAndAfterAll
-import akka.actor.ActorSystem
-import akka.actor.Props
+import scala.concurrent.Await
+import scala.concurrent.duration.DurationInt
+import scala.util.Success
+import org.ogmios.core.action.Read
 import org.ogmios.core.action.Register
 import org.ogmios.core.bean.Provider
-import java.util.Date
-import java.util.concurrent.TimeUnit
-import scala.concurrent.duration._
 import org.ogmios.core.bean.Status
-import org.ogmios.core.action.Read
+import org.scalatest.BeforeAndAfterAll
+import org.scalatest.Matchers
+import org.scalatest.WordSpecLike
+import akka.actor.ActorSystem
+import akka.actor.Props
+import akka.pattern.ask
+import akka.testkit.ImplicitSender
+import akka.testkit.TestKit
+import akka.util.Timeout.durationToTimeout
+import scala.collection.immutable.Map
+import org.ogmios.core.bean.OpResult
+import org.ogmios.core.bean.OpResult
 
 class TestAnotherProviderActor(_system: ActorSystem) extends TestKit(_system) with ImplicitSender
 with WordSpecLike with Matchers with BeforeAndAfterAll with ActorNames {
@@ -24,17 +29,35 @@ with WordSpecLike with Matchers with BeforeAndAfterAll with ActorNames {
         TestKit.shutdownActorSystem(system)
     }
 
-    val provider = system.actorOf(Props[ProviderActor], providerActor)
+    val cassandra = system.actorOf(Props[CassandraActor], cassandraActor)
             
     "A Provider Actor " must {
 
         "send back OK on successful registration" in {
-            provider ! new Register[Provider](new Provider("a-provider-id"+System.currentTimeMillis(), "MyProviderName", new Date, None))
-            provider ! new Register[Provider](new Provider("a-provider-id"+System.currentTimeMillis()+1, "MyProviderName", new Date, None))
-            val seqResp = receiveN(2, 10.seconds)
-            assert(2 === seqResp.count((x: AnyRef) => {  x.asInstanceOf[Status].state == "OK"}))
+           val msg1 = new Register[Provider](new Provider("a-provider-id"+System.currentTimeMillis(), "MyProviderName", System.currentTimeMillis(), None))
+          
+           val future = ask(cassandra, msg1)(10.second);
+           Await.ready(future, 10.second)
+           future.value match {
+             case Some(s: Success[Status]) =>  assert(s.get.state == "OK")
+             case _ => fail
+           }
         }
+    }
+    
+    "A Provider Actor " must {
 
+        "send back OK on successful registration with Ref map" in {
+           val map = Map ("a"->"a", "c" -> "c")
+           val msg1 = new Register[Provider](new  Provider("a-provider-id"+System.currentTimeMillis(), "MyProviderName", System.currentTimeMillis(), Some(map)))
+          
+           val future = ask(cassandra, msg1)(10.second);
+           Await.ready(future, 10.second)
+           future.value match {
+             case Some(s: Success[Status]) =>  assert(s.get.state == "OK")
+             case _ => fail
+           }
+        }
     }
     
     "A Provider Actor " must {
@@ -43,13 +66,21 @@ with WordSpecLike with Matchers with BeforeAndAfterAll with ActorNames {
             val id = "a-provider-id4read-"+System.currentTimeMillis()
             
             // create the object
-            provider ! new Register[Provider](new Provider(id, "MyProviderName", new Date, None))
-            val createResp = receiveN(1, 5.seconds)
-           
+            val msg1 = new Register[Provider](new Provider(id, "MyProviderName", System.currentTimeMillis(), None))
+            val future = ask(cassandra, msg1)(10.second);
+            Await.ready(future, 10.second)
+            future.value match {
+              case Some(s: Success[Status]) =>  assert(s.get.state == "OK")
+              case _ => fail
+            }
+            
             // read the object
-            provider ! new Read[Provider](id)
-            val seqResp = receiveN(1, 5.seconds)
-            assert(id === (seqResp.head).asInstanceOf[Provider].id)
+            val futureGet = ask(cassandra, new Read[Provider](id))(10.second);
+            Await.ready(futureGet, 10.second)
+            futureGet.value match {
+              case Some(s: Success[OpResult[Provider]]) =>  assert(s.get.value.id === id)
+              case _ => fail
+            }
         }
     }
     
@@ -60,9 +91,12 @@ with WordSpecLike with Matchers with BeforeAndAfterAll with ActorNames {
             val id = "unknown"+System.currentTimeMillis()
            
             // read the object
-            provider ! new Read[Provider](id)
-            val seqResp = receiveN(1, 5.seconds)
-            assert("NOT_FOUND" === (seqResp.head).asInstanceOf[Status].state)
+            val futureGet = ask(cassandra, new Read[Provider](id))(10.second);
+            Await.ready(futureGet, 10.second)
+            futureGet.value match {
+              case Some(s: Success[Status]) =>  assert(s.get.state == "NOT_FOUND")
+              case _ => fail
+            }
         }
     }
 }

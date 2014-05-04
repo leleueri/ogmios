@@ -20,10 +20,6 @@ trait Action
 
 case class Register[T](element: T) extends Action
 
-case class RegisterFrom[T](element: T, sender: ActorRef) extends Action
-
 case class AddMetrics(name: String, metrics: List[MetricDesc]) extends Action
 
 case class Read[T](id: String) extends Action
-
-case class ReadFrom[T](id: String, sender: ActorRef) extends Action

@@ -34,7 +34,4 @@ trait Message{
 case class Metric(provider:String, emission: Long, reception: Long, name:String, value: String) extends Message
 
 
-
-
-
-class MetricDesc(name: String, unit: String, desc: Option[String])
+case class MetricDesc(name: String, unit: String, desc: Option[String])

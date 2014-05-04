@@ -26,3 +26,5 @@ ogmios-core.classpath
 nohup
 .idea
 .idea/
+ogmios-rest/.settings/ $
+ogmios-rest/.settings/
