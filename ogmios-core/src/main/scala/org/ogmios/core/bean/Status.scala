@@ -15,12 +15,30 @@ package org.ogmios.core.bean
  */
 
 
-trait Status {
+trait Status {   
   def state : String
   def msg : String
 }
 
+/**
+ * Status object that contains Status constants
+ */
+object Status {
+  val StateOk = "OK"
+  val StateKo = "KO"
+  val StateNotFound = "NOT_FOUND"   
+}
 
+/**
+ * Use when the operation is successful without bean result
+ */
 case class OpCompleted(val state: String, val msg : String) extends Status
+/**
+ * Use when the operation failed
+ */
 case class OpFailed(val state: String, val msg : String) extends Status
+/**
+ * Use when the operation is successful and return a bean.
+ * the bean is set in the value attribute
+ */
 case class OpResult[T](val state: String, val msg : String, val value: T) extends Status

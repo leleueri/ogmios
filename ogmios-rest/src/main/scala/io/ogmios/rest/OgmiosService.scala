@@ -4,6 +4,7 @@ import akka.actor.Actor
 import akka.pattern._
 import spray.routing._
 import spray.http._
+import spray.http.StatusCodes._
 import MediaTypes._
 import akka.actor.Props
 import org.ogmios.core.actor.CassandraActor
@@ -23,6 +24,19 @@ import scala.concurrent.Await
 import scala.util.Success
 import org.ogmios.core.bean.OpCompleted
 import org.ogmios.core.bean.OpCompleted
+import org.ogmios.core.action.Read
+import org.ogmios.core.bean.OpResult
+import org.ogmios.core.bean.OpFailed
+import org.ogmios.core.bean.OpFailed
+import org.ogmios.core.bean.OpFailed
+import org.ogmios.core.bean.OpCompleted
+import io.ogmios.rest.exception.NotFoundException
+import org.omg.CosNaming.NamingContextPackage.NotFound
+import org.ogmios.core.bean.OpFailed
+import io.ogmios.rest.exception.OgmiosException
+import io.ogmios.rest.exception.OgmiosException
+import io.ogmios.rest.exception.InternalErrorException
+import io.ogmios.rest.exception.NotFoundException
 
 // we don't implement our route structure directly in the service actor because
 // we want to be able to test it independently, without having to spin up an actor
@@ -43,23 +57,44 @@ class OgmiosServiceActor extends Actor with OgmiosService with ActorNames {
 
 // this trait defines our service behavior independently from the service actor
 trait OgmiosService extends HttpService  {
+  
+  // Await timeout
   implicit val timeout = Timeout(2.second)
-  implicit val PersonFormat = jsonFormat4(Provider)
+  // JSON unmarshaller
+  implicit val providerJsonFormat = jsonFormat4(Provider)
+  implicit val opFailedJsonFormat = jsonFormat2(OpFailed)
   
   def cassandraEndPoint: ActorRef
+  
+  /**
+   * This handler complete the route with a status adapted to the received exception
+   * Unmanaged exception are computed by the default spray handler 
+   */
+  implicit val ogmiosExceptionHandler = ExceptionHandler {
+    case ex : OgmiosException => complete(ex.status, ex.opStatus)
+  }
   
   val ogmiosRoute =
     path("providers"/Segment) { providerId =>
       put {
         entity(as[Provider]) { provider =>
-          
-          complete{
-              val res = ask (cassandraEndPoint, new Register[Provider](provider)).mapTo[Status]
-              Await.ready(res, 5.second)
-              res.value match {
-                case Some(s: Success[OpCompleted]) => StatusCodes.Created
-                case _ => StatusCodes.InternalServerError
-            }
+          // Are there a better way to manage Future response?
+          val res = Await.result(ask (cassandraEndPoint, new Register[Provider](provider)).mapTo[Status], 5.second)
+          res match {
+            case OpCompleted(_,_) => complete(Created)
+            case op : OpFailed => throw new InternalErrorException(op)
+          }
+        }
+      } ~
+      get {
+        complete {
+          val res = Await.result(ask (cassandraEndPoint, new Read[Provider](providerId)).mapTo[Status], 5.second)
+          res match {
+            case OpResult(_, _, value: Provider) => value
+            case op : OpFailed => throw if (op.state == Status.StateNotFound ) 
+              new NotFoundException(op) 
+            else 
+              new InternalErrorException(op)
           }
         }
       }

@@ -66,8 +66,9 @@ with WordSpecLike with Matchers with BeforeAndAfterAll with ActorNames {
             val id = "a-provider-id4read-"+System.currentTimeMillis()
             
             // create the object
-            val msg1 = new Register[Provider](new Provider(id, "MyProviderName", System.currentTimeMillis(), None))
-            val future = ask(cassandra, msg1)(10.second);
+            val map = Map ("a"->"a", "c" -> "c")
+            val msg1 = new Register[Provider](new Provider(id, "MyProviderName", System.currentTimeMillis(), Some(map)))
+            val future = ask(cassandra, msg1)(3600.second);
             Await.ready(future, 10.second)
             future.value match {
               case Some(s: Success[Status]) =>  assert(s.get.state == "OK")

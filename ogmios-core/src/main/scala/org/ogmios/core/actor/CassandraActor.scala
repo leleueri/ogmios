@@ -44,7 +44,6 @@ class CassandraActor extends Actor with ActorLogging with ConfigCassandraCluster
   
   val session = cluster.connect(Keyspaces.ogmios)
   
-  // TODO addition of REF
   val insertProviderStmt = session.prepare("INSERT INTO providers(id, name, registration) VALUES (?, ?, ?);")
   val insertFullProviderStmt = session.prepare("INSERT INTO providers(id, name, registration, ref) VALUES (?, ?, ?, ?);")
   val selectProviderStmt = session.prepare("SELECT * FROM providers WHERE id = ?;")
@@ -56,50 +55,41 @@ class CassandraActor extends Actor with ActorLogging with ConfigCassandraCluster
       case None => toFuture(session.executeAsync(insertProviderStmt.bind(provider.id, provider.name, new Date(provider.creation))))
     }
     
-    f.map 
-    { 
-      (x : ResultSet) => new OpCompleted("OK", "")
+    f.map { 
+      (x : ResultSet) => new OpCompleted(Status.StateOk, "")
     } recover {
-      case e => new OpFailed("KO", e.getMessage())
+      case e => new OpFailed(Status.StateKo, e.getMessage())
     }
   }
   
   def readProvider(id: String): Future[Status] = {
     val f = toFuture(session.executeAsync(selectProviderStmt.bind(id)))
-    // TODO ugly we should have a Typed Status that contains the Provider bean (or another one, with a None value in non OK status)
+
     f.flatMap {
       (rs : ResultSet) => { 
             val extractedLocalValue = rs.iterator() 
             if ( extractedLocalValue.hasNext()) {
+              
                 val row = extractedLocalValue.next()
                 
-                val map = if (row.isNull("ref")) 
-                    None 
-                  else 
-                    Some(mapAsScalaMap(row.getMap("ref", Class.forName("java.lang.String"), Class.forName("java.lang.String"))).asInstanceOf[Map[String, String]]) 
+                val map = if (row.isNull("ref")) None 
+                          else {
+                            val jmap = row.getMap("ref", classOf[String], classOf[String])
+                            Some(jmap.toMap)
+                          } 
                 
                 val readProvider = new Provider(row.getString("id"),
-                row.getString("name"),
-                row.getDate("registration").getTime(),
-                map)
+                                                row.getString("name"),
+                                                row.getDate("registration").getTime(),
+                                                map)
                 
-                val p = Promise[OpResult[Provider]]
-                p success new OpResult("OK", "", readProvider)
-                p.future
+                Future {new OpResult(Status.StateOk, "", readProvider)}
             } else  {
-                val p = Promise[OpFailed]
-                p success {
-                  new OpFailed("NOT_FOUND", "Unknown provider id '" + id +"'")
-                }
-                p.future
+                Future {new OpFailed(Status.StateNotFound, "Unknown provider id '" + id +"'")}
             }
         }
     } recoverWith {
-      case e:Exception => val p = Promise[OpFailed]
-                p success {
-                  new OpFailed("KO", e.getMessage())
-                }
-                p.future
+      case e:Exception => Future {new OpFailed(Status.StateKo, e.getMessage())}
     }
   }
   
