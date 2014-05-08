@@ -37,6 +37,7 @@ import io.ogmios.rest.exception.OgmiosException
 import io.ogmios.rest.exception.OgmiosException
 import io.ogmios.rest.exception.InternalErrorException
 import io.ogmios.rest.exception.NotFoundException
+import scala.concurrent.ExecutionContext.Implicits.global
 
 // we don't implement our route structure directly in the service actor because
 // we want to be able to test it independently, without having to spin up an actor
@@ -66,6 +67,7 @@ trait OgmiosService extends HttpService  {
   
   def cassandraEndPoint: ActorRef
   
+  
   /**
    * This handler complete the route with a status adapted to the received exception
    * Unmanaged exception are computed by the default spray handler 
@@ -78,24 +80,27 @@ trait OgmiosService extends HttpService  {
     path("providers"/Segment) { providerId =>
       put {
         entity(as[Provider]) { provider =>
-          // Are there a better way to manage Future response?
-          val res = Await.result(ask (cassandraEndPoint, new Register[Provider](provider)).mapTo[Status], 5.second)
-          res match {
-            case OpCompleted(_,_) => complete(Created)
+          val asyncResponse = ask (cassandraEndPoint, new Register[Provider](provider)).mapTo[Status].map(_ match {
+            case OpCompleted(_,_) => Created
             case op : OpFailed => throw new InternalErrorException(op)
-          }
+          })
+          complete(asyncResponse)
         }
       } ~
       get {
         complete {
-          val res = Await.result(ask (cassandraEndPoint, new Read[Provider](providerId)).mapTo[Status], 5.second)
-          res match {
+          ask (cassandraEndPoint, new Read[Provider](providerId)).mapTo[Status].map(_ match {
             case OpResult(_, _, value: Provider) => value
-            case op : OpFailed => throw if (op.state == Status.StateNotFound ) 
-              new NotFoundException(op) 
-            else 
-              new InternalErrorException(op)
-          }
+            case op : OpFailed => throw if (op.state == Status.StateNotFound ) new NotFoundException(op) else new InternalErrorException(op)
+          })
+//          val res = Await.result(ask (cassandraEndPoint, new Read[Provider](providerId)).mapTo[Status], 5.second)
+//          res match {
+//            case OpResult(_, _, value: Provider) => value
+//            case op : OpFailed => throw if (op.state == Status.StateNotFound ) 
+//              new NotFoundException(op) 
+//            else 
+//              new InternalErrorException(op)
+//          }
         }
       }
     }
