@@ -16,27 +16,13 @@ import spray.httpx.SprayJsonSupport._
 import spray.json._
 import DefaultJsonProtocol._
 import org.ogmios.core.actor.ActorNames
-import org.ogmios.core.action.Register
 import akka.util.Timeout
 import scala.concurrent.duration._
-import org.ogmios.core.bean.Status
 import scala.concurrent.Await
 import scala.util.Success
-import org.ogmios.core.bean.OpCompleted
-import org.ogmios.core.bean.OpCompleted
-import org.ogmios.core.action.Read
-import org.ogmios.core.bean.OpResult
-import org.ogmios.core.bean.OpFailed
-import org.ogmios.core.bean.OpFailed
-import org.ogmios.core.bean.OpFailed
-import org.ogmios.core.bean.OpCompleted
-import io.ogmios.rest.exception.NotFoundException
-import org.omg.CosNaming.NamingContextPackage.NotFound
-import org.ogmios.core.bean.OpFailed
-import io.ogmios.rest.exception.OgmiosException
-import io.ogmios.rest.exception.OgmiosException
-import io.ogmios.rest.exception.InternalErrorException
-import io.ogmios.rest.exception.NotFoundException
+import org.ogmios.core.action._
+import org.ogmios.core.bean._
+import io.ogmios.rest.exception._
 import scala.concurrent.ExecutionContext.Implicits.global
 
 // we don't implement our route structure directly in the service actor because
@@ -80,27 +66,39 @@ trait OgmiosService extends HttpService  {
     path("providers"/Segment) { providerId =>
       put {
         entity(as[Provider]) { provider =>
-          val asyncResponse = ask (cassandraEndPoint, new Register[Provider](provider)).mapTo[Status].map(_ match {
-            case OpCompleted(_,_) => Created
-            case op : OpFailed => throw new InternalErrorException(op)
-          })
-          complete(asyncResponse)
+          if (provider.id == providerId) {
+              val asyncResponse = ask (cassandraEndPoint, new Register[Provider](provider)).mapTo[Status].map(_ match {
+                case OpCompleted(_,_) => Created
+                case op : OpFailed if op.state == Status.StateConflict => throw new ConflictException(op)
+                case op : OpFailed => throw new InternalErrorException(op)
+              })
+              complete(asyncResponse)
+          } else {
+            complete(BadRequest, new OpFailed(Status.StateKo, "Inconsistent providerID"))
+          }
+        }
+      } ~
+      post {
+        entity(as[Provider]) { provider =>
+          if (provider.id == providerId) {
+              val asyncResponse = ask (cassandraEndPoint, new Update[Provider](provider)).mapTo[Status].map(_ match {
+                case OpCompleted(_,_) => OK
+                case op : OpFailed if op.state == Status.StateNotFound => throw new NotFoundException(op)
+                case op : OpFailed => throw new InternalErrorException(op)
+              })
+              complete(asyncResponse)
+          } else {
+            complete(BadRequest, new OpFailed(Status.StateKo, "Inconsistent providerID"))
+          }
         }
       } ~
       get {
         complete {
           ask (cassandraEndPoint, new Read[Provider](providerId)).mapTo[Status].map(_ match {
             case OpResult(_, _, value: Provider) => value
-            case op : OpFailed => throw if (op.state == Status.StateNotFound ) new NotFoundException(op) else new InternalErrorException(op)
+            case op : OpFailed if op.state == Status.StateNotFound => throw new NotFoundException(op)
+            case op : OpFailed => throw new InternalErrorException(op)
           })
-//          val res = Await.result(ask (cassandraEndPoint, new Read[Provider](providerId)).mapTo[Status], 5.second)
-//          res match {
-//            case OpResult(_, _, value: Provider) => value
-//            case op : OpFailed => throw if (op.state == Status.StateNotFound ) 
-//              new NotFoundException(op) 
-//            else 
-//              new InternalErrorException(op)
-//          }
         }
       }
     }

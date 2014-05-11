@@ -10,4 +10,5 @@ import spray.http.StatusCodes._
 sealed class OgmiosException(val status: StatusCode, val opStatus: OpFailed) extends Exception
 
 class NotFoundException(opStatus: OpFailed) extends OgmiosException(NotFound, opStatus)
+class ConflictException(opStatus: OpFailed) extends OgmiosException(Conflict, opStatus)
 class InternalErrorException(opStatus: OpFailed) extends OgmiosException(InternalServerError, opStatus)

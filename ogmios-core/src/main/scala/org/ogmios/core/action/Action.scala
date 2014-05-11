@@ -20,6 +20,8 @@ trait Action
 
 case class Register[T](element: T) extends Action
 
+case class Update[T](element: T) extends Action
+
 case class AddMetrics(name: String, metrics: List[MetricDesc]) extends Action
 
 case class Read[T](id: String) extends Action

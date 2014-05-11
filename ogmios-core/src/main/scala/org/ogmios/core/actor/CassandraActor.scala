@@ -1,12 +1,10 @@
 package org.ogmios.core.actor
 
 import java.util.Date
-
 import scala.collection.JavaConversions.mapAsJavaMap
 import scala.collection.JavaConversions.mapAsScalaMap
 import scala.concurrent.Future
 import scala.concurrent.Promise
-
 import org.ogmios.core.action.Read
 import org.ogmios.core.action.Register
 import org.ogmios.core.bean.OpCompleted
@@ -15,12 +13,17 @@ import org.ogmios.core.bean.OpResult
 import org.ogmios.core.bean.Provider
 import org.ogmios.core.bean.Status
 import org.ogmios.core.config.ConfigCassandraCluster
-
 import com.datastax.driver.core.ResultSet
-
 import akka.actor.Actor
 import akka.actor.ActorLogging
 import akka.pattern.pipe
+import com.datastax.driver.core.Row
+import scala.util.Try
+import org.ogmios.core.bean.OpCompleted
+import scala.util.Success
+import scala.util.Failure
+import org.ogmios.core.action.Update
+import java.util.Map
 
 /**
  * Licensed under the Apache License, Version 2.0 (the "License");
@@ -44,28 +47,81 @@ class CassandraActor extends Actor with ActorLogging with ConfigCassandraCluster
   
   val session = cluster.connect(Keyspaces.ogmios)
   
-  val insertProviderStmt = session.prepare("INSERT INTO providers(id, name, registration) VALUES (?, ?, ?);")
-  val insertFullProviderStmt = session.prepare("INSERT INTO providers(id, name, registration, ref) VALUES (?, ?, ?, ?);")
+  val insertProviderStmt = session.prepare("INSERT INTO providers(id, name, registration, ref) VALUES (?, ?, ?, ?) IF NOT EXISTS;")
+  val updateProviderStmt = session.prepare("UPDATE providers SET ref = ? WHERE id = ?;")
   val selectProviderStmt = session.prepare("SELECT * FROM providers WHERE id = ?;")
 
+  
+  /**
+   * This method allow to create a row controlling if the provider id is available.
+   * If the row exists, a OpFailed is returned with the Conflict state.
+   * If the row is missing, a OpCompleted is returned with the Ok state. (the provider is now present in the datastore)
+   * Otherwise a OpFailed with the Ko state will be provided if an exception occurs
+   */
   def saveProvider(provider: Provider): Future[Status] = {
-    
-    val f = provider.ref match {
-      case Some(map) => toFuture(session.executeAsync(insertFullProviderStmt.bind(provider.id, provider.name, new Date(provider.creation), mapAsJavaMap(map))))
-      case None => toFuture(session.executeAsync(insertProviderStmt.bind(provider.id, provider.name, new Date(provider.creation))))
+    val saveFuture = provider.ref match {
+      case Some(map) => toFuture(session.executeAsync(insertProviderStmt.bind(provider.id, provider.name, new Date(provider.creation), mapAsJavaMap(map))))
+      case None => toFuture(session.executeAsync(insertProviderStmt.bind(provider.id, provider.name, new Date(provider.creation), null)))
     }
-    
-    f.map { 
-      (x : ResultSet) => new OpCompleted(Status.StateOk, "")
+    saveFuture.map { 
+      (rs : ResultSet) => 
+        val row = rs.one();
+        if (row.getBool("[applied]")) 
+          new OpCompleted(Status.StateOk, "") 
+        else 
+          new OpFailed(Status.StateConflict, "provider '"+provider.id+"' already exists")
     } recover {
       case e => new OpFailed(Status.StateKo, e.getMessage())
     }
   }
   
+  /**
+   * This method allow to update the ref field of the given provider.
+   * If the row doesn't exist, a OpFailed is returned with the NotFound state.
+   * If the row exists, a OpCompleted is returned with the Ok state.
+   * Otherwise a OpFailed with the Ko state will be provided if an exception occurs
+   */
+  def updateProvider(provider: Provider): Future[Status] = {
+    val promise = Promise[Status]
+    // TODO use map/flatMap to compute try results
+    Future {
+        Try(session.execute(selectProviderStmt.bind(provider.id)))
+        match {
+          case Success(rs) => {
+              val extractedLocalValue = rs.iterator() 
+              if ( extractedLocalValue.hasNext()) {
+                  log.debug(s"provider ${provider.id} exists, update can be performed")
+                  Try(
+                      provider.ref match {
+                          case Some(map) => session.execute(updateProviderStmt.bind(mapAsJavaMap(map), provider.id))
+                          case None => session.execute(updateProviderStmt.bind(null, provider.id))
+                      }
+                  ) match {
+                    case Success(res) => promise success new OpCompleted(Status.StateOk, "") 
+                    case Failure(exc) => log.error(s"Unable to update Provider ${provider.id}", exc)
+                                         promise success new OpCompleted(Status.StateKo, exc.getMessage()) 
+                  }
+               } else  {
+                  log.debug(s"provider with id ${provider.id} is unknown");
+                  promise success new OpFailed(Status.StateNotFound, "Unknown provider id '" + provider.id +"'")
+               }
+          }
+          case Failure(exc) => log.error(s"Unable to update Provider ${provider.id}", exc)
+                               promise success new OpCompleted(Status.StateKo, exc.getMessage()) 
+        }
+    } 
+    promise.future
+  }
+  
+  /**
+   * This method allow to read a row with the id value as primary key.
+   * If the row exists, a OpResult is returned with an instance of Provider.
+   * If the row is missing, a OpFailed is returned with the NotFound state.
+   * Otherwise a OpFailed with the Ko state will be provided if an exception occurs
+   */
   def readProvider(id: String): Future[Status] = {
-    val f = toFuture(session.executeAsync(selectProviderStmt.bind(id)))
-
-    f.flatMap {
+    val readFuture = toFuture(session.executeAsync(selectProviderStmt.bind(id)))
+    readFuture.map {
       (rs : ResultSet) => { 
             val extractedLocalValue = rs.iterator() 
             if ( extractedLocalValue.hasNext()) {
@@ -73,29 +129,27 @@ class CassandraActor extends Actor with ActorLogging with ConfigCassandraCluster
                 val row = extractedLocalValue.next()
                 
                 val map = if (row.isNull("ref")) None 
-                          else {
-                            val jmap = row.getMap("ref", classOf[String], classOf[String])
-                            Some(jmap.toMap)
-                          } 
+                          else Some(row.getMap("ref", classOf[String], classOf[String]).toMap)
                 
                 val readProvider = new Provider(row.getString("id"),
                                                 row.getString("name"),
                                                 row.getDate("registration").getTime(),
                                                 map)
                 
-                Future {new OpResult(Status.StateOk, "", readProvider)}
+                new OpResult(Status.StateOk, "", readProvider)
             } else  {
-                Future {new OpFailed(Status.StateNotFound, "Unknown provider id '" + id +"'")}
+              log.debug(s"provider with id ${id} is unknown");
+              new OpFailed(Status.StateNotFound, "Unknown provider id '" + id +"'")
             }
         }
-    } recoverWith {
-      case e:Exception => Future {new OpFailed(Status.StateKo, e.getMessage())}
+    } recover {
+      case e => log.error(s"Unable to read provider with id ${id}", e); new OpFailed(Status.StateKo, e.getMessage())
     }
   }
   
   def receive: Receive = {
     case Register(provider: Provider) => saveProvider(provider) pipeTo sender
+    case Update(provider: Provider) => updateProvider(provider) pipeTo sender
     case Read(id: String) => readProvider(id) pipeTo sender
-  
   }
 }

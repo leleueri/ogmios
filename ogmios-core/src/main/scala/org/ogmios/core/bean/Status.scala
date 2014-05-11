@@ -26,7 +26,8 @@ trait Status {
 object Status {
   val StateOk = "OK"
   val StateKo = "KO"
-  val StateNotFound = "NOT_FOUND"   
+  val StateNotFound = "NOT_FOUND"
+  val StateConflict = "CONFLICT"      
 }
 
 /**
