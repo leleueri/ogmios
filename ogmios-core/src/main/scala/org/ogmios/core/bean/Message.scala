@@ -18,20 +18,25 @@ trait Message{
 
   def provider: String
 
+  def name: String
+  
   def emission: Long
 
-  def reception: Long
 }
 
 /**
  *
  * @param provider the name/identifier of the data provider. This provider reference a profile that is registered in the system
  * @param emission the emission date of the metrics by the provider
- * @param reception the reception date of the metrics by the ogmios server
  * @param name name of the metric. This name must be defined in the provider profile
  * @param value value of the metric (value must be interpreted according to the Unit defined in the provider profile for this metrics name
  */
-case class Metric(provider:String, emission: Long, reception: Long, name:String, value: String) extends Message
-
-
-case class MetricDesc(name: String, unit: String, desc: Option[String])
+case class Metric(provider:String, emission: Long, name:String, value: Double ) extends Message
+/**
+ *
+ * @param provider the name/identifier of the data provider. This provider reference a profile that is registered in the system
+ * @param emission the emission date of the metrics by the provider
+ * @param name name of the metric. This name must be defined in the provider profile
+ * @param properties The event attributes
+ */
+case class Event(provider:String, emission: Long, name:String, properties: Map[String, String]) extends Message

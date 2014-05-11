@@ -24,6 +24,9 @@ import scala.util.Success
 import scala.util.Failure
 import org.ogmios.core.action.Update
 import java.util.Map
+import org.ogmios.core.bean.Message
+import org.ogmios.core.bean.Metric
+import org.ogmios.core.bean.Event
 
 /**
  * Licensed under the Apache License, Version 2.0 (the "License");
@@ -48,9 +51,24 @@ class CassandraActor extends Actor with ActorLogging with ConfigCassandraCluster
   val session = cluster.connect(Keyspaces.ogmios)
   
   val insertProviderStmt = session.prepare("INSERT INTO providers(id, name, registration, ref) VALUES (?, ?, ?, ?) IF NOT EXISTS;")
+  val insertMetricStmt = session.prepare("INSERT INTO metrics(providerid, metricname, registration, generation, value) VALUES (?, ?, ?, ?, ?)")
+  val insertEventStmt = session.prepare("INSERT INTO events(providerid, eventname, registration, generation, properties) VALUES (?, ?, ?, ?, ?)")
   val updateProviderStmt = session.prepare("UPDATE providers SET ref = ? WHERE id = ?;")
   val selectProviderStmt = session.prepare("SELECT * FROM providers WHERE id = ?;")
 
+  def saveMessage(message: Message): Future[Status] = {
+    // TODO check the provider existence???
+    val saveFuture = message match {
+      case m: Metric => toFuture(session.executeAsync(insertMetricStmt.bind(m.provider, m.name, new Date(), new Date(m.emission),  m.value:java.lang.Double)))
+      case e: Event => toFuture(session.executeAsync(insertEventStmt.bind(e.provider, e.name, new Date(), new Date(e.emission), mapAsJavaMap(e.properties))))
+    }
+    
+    saveFuture.map { 
+      (rs : ResultSet) => new OpCompleted(Status.StateOk, "") 
+    } recover {
+      case e => new OpFailed(Status.StateKo, e.getMessage())
+    }
+  }
   
   /**
    * This method allow to create a row controlling if the provider id is available.
@@ -148,6 +166,7 @@ class CassandraActor extends Actor with ActorLogging with ConfigCassandraCluster
   }
   
   def receive: Receive = {
+    case Register(msg: Message) => saveMessage(msg) pipeTo sender
     case Register(provider: Provider) => saveProvider(provider) pipeTo sender
     case Update(provider: Provider) => updateProvider(provider) pipeTo sender
     case Read(id: String) => readProvider(id) pipeTo sender
