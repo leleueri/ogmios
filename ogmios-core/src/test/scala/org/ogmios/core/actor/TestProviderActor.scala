@@ -25,7 +25,7 @@ import org.ogmios.core.bean.Event
 class TestProviderActor(_system: ActorSystem) extends TestKit(_system) with ImplicitSender
 with WordSpecLike with Matchers with BeforeAndAfterAll with ActorNames {
 
-  // TODO read scalatest documentation to improve following tests
+  // TODO read scalatest documentation to improve following tests (with init & cleanUp step)
   
     def this() = this(ActorSystem("TestProviderActor"))
 
@@ -95,6 +95,19 @@ with WordSpecLike with Matchers with BeforeAndAfterAll with ActorNames {
     }
     
     "A Cassandra Actor" must {
+        "send back NotFound on metrics registration with unknown provider" in {
+          val providerId = "prov-metrics-unknown"
+          val msg2 = new Register[Metric](new Metric(providerId, name = "mName", emission = System.currentTimeMillis(), value = 85.987))
+          val futureM = ask(cassandra, msg2)(10.second);
+          Await.ready(futureM, 10.second)
+          futureM.value match {
+            case Some(s: Success[Status]) => s.get.state shouldBe Status.StateNotFound
+            case _ => fail
+          }
+        }
+    }
+    
+    "A Cassandra Actor" must {
         "send back OK on successful registration with Ref map" in {
            val map = Map ("a"->"a", "c" -> "c")
            val msg1 = new Register[Provider](new  Provider("a-provider-id"+System.currentTimeMillis(), "MyProviderName", System.currentTimeMillis(), Some(map)))
@@ -160,7 +173,7 @@ with WordSpecLike with Matchers with BeforeAndAfterAll with ActorNames {
            
             // read the object
             val futureGet = ask(cassandra, new Read[Provider](id))(10.second);
-            Await.ready(futureGet, 10.second)
+            Await.ready(futureGet, 50.second)
             futureGet.value match {
               case Some(s: Success[Status]) =>  s.get.state shouldBe Status.StateNotFound
               case _ => fail

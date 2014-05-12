@@ -33,7 +33,7 @@ object Status {
 /**
  * Use when the operation is successful without bean result
  */
-case class OpCompleted(val state: String, val msg : String) extends Status
+case class OpCompleted(val state: String, val msg : String = "") extends Status
 /**
  * Use when the operation failed
  */
@@ -42,4 +42,4 @@ case class OpFailed(val state: String, val msg : String) extends Status
  * Use when the operation is successful and return a bean.
  * the bean is set in the value attribute
  */
-case class OpResult[T](val state: String, val msg : String, val value: T) extends Status
+case class OpResult[T](val state: String, val value: T, val msg : String="") extends Status

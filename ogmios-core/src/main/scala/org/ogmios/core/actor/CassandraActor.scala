@@ -27,6 +27,10 @@ import java.util.Map
 import org.ogmios.core.bean.Message
 import org.ogmios.core.bean.Metric
 import org.ogmios.core.bean.Event
+import scala.util.Success
+import scala.util.Failure
+import com.datastax.driver.core.PreparedStatement
+import com.datastax.driver.core.BoundStatement
 
 /**
  * Licensed under the Apache License, Version 2.0 (the "License");
@@ -49,25 +53,38 @@ class CassandraActor extends Actor with ActorLogging with ConfigCassandraCluster
   override def system = context.system
   
   val session = cluster.connect(Keyspaces.ogmios)
-  
   val insertProviderStmt = session.prepare("INSERT INTO providers(id, name, registration, ref) VALUES (?, ?, ?, ?) IF NOT EXISTS;")
   val insertMetricStmt = session.prepare("INSERT INTO metrics(providerid, metricname, registration, generation, value) VALUES (?, ?, ?, ?, ?)")
   val insertEventStmt = session.prepare("INSERT INTO events(providerid, eventname, registration, generation, properties) VALUES (?, ?, ?, ?, ?)")
   val updateProviderStmt = session.prepare("UPDATE providers SET ref = ? WHERE id = ?;")
   val selectProviderStmt = session.prepare("SELECT * FROM providers WHERE id = ?;")
 
+  /**
+   * Save the Message if the Provider exists 
+   */
   def saveMessage(message: Message): Future[Status] = {
-    // TODO check the provider existence???
-    val saveFuture = message match {
-      case m: Metric => toFuture(session.executeAsync(insertMetricStmt.bind(m.provider, m.name, new Date(), new Date(m.emission),  m.value:java.lang.Double)))
-      case e: Event => toFuture(session.executeAsync(insertEventStmt.bind(e.provider, e.name, new Date(), new Date(e.emission), mapAsJavaMap(e.properties))))
+    // overkill ?
+    def checkProviderAndExec(statement: BoundStatement) : Status = {
+      val resultSet = session.execute(selectProviderStmt.bind(message.provider))
+      if (resultSet.iterator().hasNext()) {
+          session.executeAsync(statement)
+          new OpCompleted(Status.StateOk) 
+      } else {
+          new OpCompleted(Status.StateNotFound, s"Provider ${message.provider} is unknown")  
+      }
     }
     
-    saveFuture.map { 
-      (rs : ResultSet) => new OpCompleted(Status.StateOk, "") 
-    } recover {
-      case e => new OpFailed(Status.StateKo, e.getMessage())
+    val savePromise = Promise[Status]
+    Future {
+       Try(message match {
+           case m: Metric => checkProviderAndExec(insertMetricStmt.bind(m.provider, m.name, new Date(), new Date(m.emission),  m.value:java.lang.Double))
+           case e: Event => checkProviderAndExec(insertEventStmt.bind(e.provider, e.name, new Date(), new Date(e.emission), mapAsJavaMap(e.properties)))
+       }) match {
+         case Success(status: Status) => savePromise success status
+         case Failure(e) => savePromise success new OpFailed(Status.StateKo, e.getMessage())
+       }
     }
+    savePromise.future
   }
   
   /**
@@ -85,7 +102,7 @@ class CassandraActor extends Actor with ActorLogging with ConfigCassandraCluster
       (rs : ResultSet) => 
         val row = rs.one();
         if (row.getBool("[applied]")) 
-          new OpCompleted(Status.StateOk, "") 
+          new OpCompleted(Status.StateOk) 
         else 
           new OpFailed(Status.StateConflict, "provider '"+provider.id+"' already exists")
     } recover {
@@ -101,32 +118,29 @@ class CassandraActor extends Actor with ActorLogging with ConfigCassandraCluster
    */
   def updateProvider(provider: Provider): Future[Status] = {
     val promise = Promise[Status]
-    // TODO use map/flatMap to compute try results
     Future {
-        Try(session.execute(selectProviderStmt.bind(provider.id)))
-        match {
-          case Success(rs) => {
-              val extractedLocalValue = rs.iterator() 
-              if ( extractedLocalValue.hasNext()) {
-                  log.debug(s"provider ${provider.id} exists, update can be performed")
-                  Try(
-                      provider.ref match {
-                          case Some(map) => session.execute(updateProviderStmt.bind(mapAsJavaMap(map), provider.id))
-                          case None => session.execute(updateProviderStmt.bind(null, provider.id))
-                      }
-                  ) match {
-                    case Success(res) => promise success new OpCompleted(Status.StateOk, "") 
-                    case Failure(exc) => log.error(s"Unable to update Provider ${provider.id}", exc)
-                                         promise success new OpCompleted(Status.StateKo, exc.getMessage()) 
-                  }
-               } else  {
-                  log.debug(s"provider with id ${provider.id} is unknown");
-                  promise success new OpFailed(Status.StateNotFound, "Unknown provider id '" + provider.id +"'")
-               }
-          }
-          case Failure(exc) => log.error(s"Unable to update Provider ${provider.id}", exc)
-                               promise success new OpCompleted(Status.StateKo, exc.getMessage()) 
+        def executeProviderUpdate() {
+          val rs = session.execute(selectProviderStmt.bind(provider.id))
+          val extractedLocalValue = rs.iterator() 
+          if ( extractedLocalValue.hasNext()) {
+              log.debug(s"provider ${provider.id} exists, update can be performed")
+              provider.ref match {
+                case Some(map) => session.execute(updateProviderStmt.bind(mapAsJavaMap(map), provider.id))
+                case None => session.execute(updateProviderStmt.bind(null, provider.id))
+              }
+              promise success new OpCompleted(Status.StateOk)
+           } else  {
+              log.debug(s"provider with id ${provider.id} is unknown");
+              promise success new OpFailed(Status.StateNotFound, "Unknown provider id '" + provider.id +"'")
+           }
         }
+         
+        Try(executeProviderUpdate) recover {
+          case exc => 
+            log.error(s"Unable to update Provider ${provider.id}", exc)
+            promise success new OpFailed(Status.StateKo, exc.getMessage()) 
+        }
+        
     } 
     promise.future
   }
@@ -143,18 +157,14 @@ class CassandraActor extends Actor with ActorLogging with ConfigCassandraCluster
       (rs : ResultSet) => { 
             val extractedLocalValue = rs.iterator() 
             if ( extractedLocalValue.hasNext()) {
-              
                 val row = extractedLocalValue.next()
-                
-                val map = if (row.isNull("ref")) None 
-                          else Some(row.getMap("ref", classOf[String], classOf[String]).toMap)
-                
+                val map = if (row.isNull("ref")) None else Some(row.getMap("ref", classOf[String], classOf[String]).toMap)
                 val readProvider = new Provider(row.getString("id"),
                                                 row.getString("name"),
                                                 row.getDate("registration").getTime(),
                                                 map)
                 
-                new OpResult(Status.StateOk, "", readProvider)
+                new OpResult(Status.StateOk, readProvider)
             } else  {
               log.debug(s"provider with id ${id} is unknown");
               new OpFailed(Status.StateNotFound, "Unknown provider id '" + id +"'")

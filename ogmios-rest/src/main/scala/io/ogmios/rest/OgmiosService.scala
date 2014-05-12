@@ -48,8 +48,6 @@ class OgmiosServiceActor extends Actor with OgmiosService with ActorNames with A
   override val cassandraEndPoint = context.actorOf(Props[CassandraActor], cassandraActor)
 }
 
-
-
 // this trait defines our service behavior independently from the service actor
 trait OgmiosService extends HttpService {
   
@@ -93,31 +91,16 @@ trait OgmiosService extends HttpService {
       } ~
       post {
         parameterMap { params =>
-          if (params.isDefinedAt("event")) {
+          if (params.contains("event")) {
             entity(as[Event]) { eventBean =>
-              if (eventBean.provider == providerId) {
-                  val asyncResponse = ask (cassandraEndPoint, new Register[Event](eventBean)).mapTo[Status].map(_ match {
-                    case OpCompleted(_,_) => OK
-                    case op : OpFailed => throw new InternalErrorException(op)
-                  })
-                  complete(asyncResponse)
-              } else {
-                complete(BadRequest, new OpFailed(Status.StateKo, "Inconsistent providerID"))
-              }
+              registerMessage(eventBean, providerId)
             }
-          } else if (params.isDefinedAt("metric")) {
+          } else if (params.contains("metric")) {
             entity(as[Metric]) { metricBean =>
-              if (metricBean.provider == providerId) {
-                  val asyncResponse = ask (cassandraEndPoint, new Register[Metric](metricBean)).mapTo[Status].map(_ match {
-                    case OpCompleted(_,_) => OK
-                    case op : OpFailed => throw new InternalErrorException(op)
-                  })
-                  complete(asyncResponse)
-              } else {
-                complete(BadRequest, new OpFailed(Status.StateKo, "Inconsistent providerID"))
-              }
+              registerMessage(metricBean, providerId)
             }
-          } else {entity(as[Provider]) { provider =>
+          } else {
+            entity(as[Provider]) { provider =>
               if (provider.id == providerId) {
                   val asyncResponse = ask (cassandraEndPoint, new Update[Provider](provider)).mapTo[Status].map(_ match {
                     case OpCompleted(_,_) => OK
@@ -142,5 +125,17 @@ trait OgmiosService extends HttpService {
         }
       }
     }
+  }
+  
+  def registerMessage[T <: Message](message: T, providerId: String) : Route = {
+      if (message.provider == providerId) {
+          val asyncResponse = ask (cassandraEndPoint, new Register[T](message)).mapTo[Status].map(_ match {
+            case OpCompleted(_,_) => OK
+            case op : OpFailed => throw new InternalErrorException(op)
+          })
+          complete(asyncResponse)
+      } else {
+        complete(BadRequest, new OpFailed(Status.StateKo, "Inconsistent providerID"))
+      }
   }
 }
