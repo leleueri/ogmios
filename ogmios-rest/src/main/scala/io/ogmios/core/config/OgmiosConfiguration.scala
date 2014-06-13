@@ -1,7 +1,4 @@
-package io.ogmios.core.action
-
-import akka.actor.ActorRef
-import io.ogmios.core.bean.Message
+package io.ogmios.core.config
 
 /**
  * Licensed under the Apache License, Version 2.0 (the "License");
@@ -16,16 +13,22 @@ import io.ogmios.core.bean.Message
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
-trait Action
+// COPY/PASTE from the Akka/Cassandra activator
 
-case class Register[T](element: T) extends Action
+import com.datastax.driver.core.{ProtocolOptions, Cluster}
+import akka.actor.ActorSystem
 
-case class Update[T](element: T) extends Action
+trait OgmiosConfig {
+  def system: ActorSystem
 
-case class Read[T](id: String) extends Action
+  private def config = {
+    system.settings.config
+  }
 
-case class DeleteProvider(id: String) extends Action
+  import scala.collection.JavaConversions._
+  private val ogmiosConfig = config.getConfig("ogmios")
 
-case class ReadEventsTimeline(provider: String, name: String, begin: Long, end: Option[Long]) extends Action
-
-case class ReadMetricsTimeline(provider: String, name: String, begin: Long, end: Option[Long]) extends Action
+  def eventsTtl = ogmiosConfig.getInt("eventsTtl")
+  
+  def metricsTtl = ogmiosConfig.getInt("metricsTtl")
+}

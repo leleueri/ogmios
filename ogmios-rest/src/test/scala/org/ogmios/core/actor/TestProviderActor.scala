@@ -1,16 +1,16 @@
-package org.ogmios.core.actor
+package io.ogmios.core.actor
 
 import scala.collection.immutable.Map
 import scala.concurrent.Await
 import scala.concurrent.TimeoutException
 import scala.concurrent.duration.DurationInt
 import scala.util.Success
-import org.ogmios.core.action.Read
-import org.ogmios.core.action.Register
-import org.ogmios.core.action.Update
-import org.ogmios.core.bean.OpResult
-import org.ogmios.core.bean.Provider
-import org.ogmios.core.bean.OgmiosStatus
+import io.ogmios.core.action.Read
+import io.ogmios.core.action.Register
+import io.ogmios.core.action.Update
+import io.ogmios.core.bean.OpResult
+import io.ogmios.core.bean.Provider
+import io.ogmios.core.bean.OgmiosStatus
 import org.scalatest.BeforeAndAfterAll
 import org.scalatest.Matchers
 import org.scalatest.WordSpecLike
@@ -19,12 +19,12 @@ import akka.actor.Props
 import akka.pattern.ask
 import akka.testkit.ImplicitSender
 import akka.testkit.TestKit
-import org.ogmios.core.bean.Metric
-import org.ogmios.core.bean.Event
-import org.ogmios.core.action.ReadMetricsTimeline
+import io.ogmios.core.bean.Metric
+import io.ogmios.core.bean.Event
+import io.ogmios.core.action.ReadMetricsTimeline
 import com.datastax.driver.core.ResultSet
-import org.ogmios.core.action.ReadEventsTimeline
-import org.ogmios.core.bean.OpResult
+import io.ogmios.core.action.ReadEventsTimeline
+import io.ogmios.core.bean.OpResult
 import scala.concurrent.Future
 import com.datastax.driver.core.ResultSetFuture
 import scala.util.Success
@@ -33,6 +33,7 @@ import scala.concurrent.ExecutionContext.Implicits.global
 import scala.util.Failure
 import io.ogmios.exception.NotFoundException
 import io.ogmios.exception.ConflictException
+import io.ogmios.core.action.DeleteProvider
 
 class TestProviderActor(_system: ActorSystem) extends TestKit(_system) with ImplicitSender
 with WordSpecLike with Matchers with BeforeAndAfterAll with ActorNames {
@@ -49,7 +50,8 @@ with WordSpecLike with Matchers with BeforeAndAfterAll with ActorNames {
             
     "A Cassandra Actor" must {
         "send back OK on successful registration" in {
-           val msg1 = new Register[Provider](new Provider("a-provider-id"+System.currentTimeMillis(), "MyProviderName", System.currentTimeMillis(), None))
+           val id = "a-provider-id"+System.currentTimeMillis()
+           val msg1 = new Register[Provider](new Provider(id, "MyProviderName", System.currentTimeMillis(), None))
           
            val future = ask(cassandra, msg1)(10.second);
            Await.ready(future, 10.second)
@@ -57,6 +59,9 @@ with WordSpecLike with Matchers with BeforeAndAfterAll with ActorNames {
              case Some(s: Success[OgmiosStatus]) => s.get.state shouldBe OgmiosStatus.StateOk
              case _ => fail
            }
+           
+           val futureDelete = ask(cassandra, new DeleteProvider(id))(10.second);
+           Await.ready(futureDelete, 10.second)
         }
     }
     
@@ -98,8 +103,12 @@ with WordSpecLike with Matchers with BeforeAndAfterAll with ActorNames {
              case Some(s: Success[OpResult[Future[ResultSet]]]) => checkReadTimeline(s.get.value, 2)
              case _ => fail
            }
+           
+           val futureDelete = ask(cassandra, new DeleteProvider(providerId))(10.second);
+           Await.ready(futureDelete, 10.second)
         }
     }
+    
     def checkReadTimeline(future: Future[ResultSet], size: Int) {
       Await.ready(future, 10.second)
            future.value match {
@@ -146,6 +155,9 @@ with WordSpecLike with Matchers with BeforeAndAfterAll with ActorNames {
              case Some(s: Success[OpResult[Future[ResultSet]]]) => checkReadTimeline(s.get.value, 2)
              case _ => fail
            }
+                      
+           val futureDelete = ask(cassandra, new DeleteProvider(providerId))(10.second);
+           Await.ready(futureDelete, 10.second)
         }
     }
     
@@ -164,8 +176,9 @@ with WordSpecLike with Matchers with BeforeAndAfterAll with ActorNames {
     
     "A Cassandra Actor" must {
         "send back OK on successful registration with Ref map" in {
+           val providerId ="a-provider-id"+System.currentTimeMillis() 
            val map = Map ("a"->"a", "c" -> "c")
-           val msg1 = new Register[Provider](new  Provider("a-provider-id"+System.currentTimeMillis(), "MyProviderName", System.currentTimeMillis(), Some(map)))
+           val msg1 = new Register[Provider](new  Provider(providerId, "MyProviderName", System.currentTimeMillis(), Some(map)))
           
            val future = ask(cassandra, msg1)(10.second);
            Await.ready(future, 10.second)
@@ -173,6 +186,9 @@ with WordSpecLike with Matchers with BeforeAndAfterAll with ActorNames {
              case Some(s: Success[OgmiosStatus]) => s.get.state shouldBe OgmiosStatus.StateOk
              case _ => fail
            }
+           
+           val futureDelete = ask(cassandra, new DeleteProvider(providerId))(10.second);
+           Await.ready(futureDelete, 10.second)
         }
     }
      
@@ -195,6 +211,10 @@ with WordSpecLike with Matchers with BeforeAndAfterAll with ActorNames {
             case Some(s: Failure[ConflictException]) => "ok"
             case _ => fail
            }
+           
+           
+           val futureDelete = ask(cassandra, new DeleteProvider(providerId))(10.second);
+           Await.ready(futureDelete, 10.second)
         }
     }
     
@@ -219,11 +239,28 @@ with WordSpecLike with Matchers with BeforeAndAfterAll with ActorNames {
               case Some(s: Success[OpResult[Provider]]) =>  assert(s.get.value.id === id)
               case _ => fail
             }
+            
+           val futureDelete = ask(cassandra, new DeleteProvider(id))(10.second);
+           Await.ready(futureDelete, 10.second)
+        }
+    }
+    
+    "A Cassandra Actor" must {
+        " be able to delete unknown provider description" in {
+            val id = "a-provider-id4delete-"+System.currentTimeMillis()
+            
+            // delete the object
+            val futureDelete = ask(cassandra, new DeleteProvider(id))(10.second);
+            Await.ready(futureDelete, 10.second)
+            futureDelete.value match {
+              case Some(s: Success[OgmiosStatus]) =>   s.get.state shouldBe OgmiosStatus.StateOk
+              case _ => fail
+            }
         }
     }
        
     "A Cassandra Actor" should {
-        "not provide unknown provider" in {
+        "return not found on unknown provider" in {
             val id = "unknown"+System.currentTimeMillis()
            
             // read the object

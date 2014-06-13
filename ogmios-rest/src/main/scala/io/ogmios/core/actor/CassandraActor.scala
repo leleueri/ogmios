@@ -39,6 +39,9 @@ import spray.http.StatusCodes
 import io.ogmios.exception.NotFoundException
 import io.ogmios.exception.InternalErrorException
 import io.ogmios.exception.OgmiosException
+import com.datastax.driver.core.ConsistencyLevel
+import io.ogmios.core.config.OgmiosConfig
+import io.ogmios.core.action.DeleteProvider
 
 /**
  * Licensed under the Apache License, Version 2.0 (the "License");
@@ -54,21 +57,26 @@ import io.ogmios.exception.OgmiosException
  * limitations under the License.
  */
 
-class CassandraActor extends Actor with ActorLogging with ConfigCassandraCluster with CassandraResultSetOperations {
+class CassandraActor extends Actor with ActorLogging 
+with ConfigCassandraCluster with CassandraResultSetOperations
+with OgmiosConfig {
         
   implicit val exec = context.dispatcher
   
   override def system = context.system
   
   val session = cluster.connect(Keyspaces.ogmios)
-  val insertProviderStmt = session.prepare("INSERT INTO providers(id, name, registration, ref) VALUES (?, ?, ?, ?) IF NOT EXISTS;")
-  val insertMetricStmt = session.prepare("INSERT INTO metrics(providerid, metricname, registration, generation, value) VALUES (?, ?, ?, ?, ?)")
-  val insertEventStmt = session.prepare("INSERT INTO events(providerid, eventname, registration, generation, properties) VALUES (?, ?, ?, ?, ?)")
-  val updateProviderStmt = session.prepare("UPDATE providers SET ref = ? WHERE id = ?;")
-  val selectProviderStmt = session.prepare("SELECT * FROM providers WHERE id = ?;")
+  
+  val insertProviderStmt = session.prepare("INSERT INTO providers(id, name, registration, ref) VALUES (?, ?, ?, ?) IF NOT EXISTS;").setConsistencyLevel(ConsistencyLevel.QUORUM)
+  val updateProviderStmt = session.prepare("UPDATE providers SET ref = ? WHERE id = ?;").setConsistencyLevel(ConsistencyLevel.QUORUM)
+  val selectProviderStmt = session.prepare("SELECT * FROM providers WHERE id = ?;").setConsistencyLevel(ConsistencyLevel.QUORUM)
+  val deleteProviderStmt = session.prepare("DELETE FROM providers WHERE id = ?;").setConsistencyLevel(ConsistencyLevel.QUORUM)
+ 
+  val insertMetricStmt = session.prepare("INSERT INTO metrics(providerid, metricname, registration, generation, value) VALUES (?, ?, ?, ?, ?) USING TTL ?").setConsistencyLevel(ConsistencyLevel.QUORUM)
+  val insertEventStmt = session.prepare("INSERT INTO events(providerid, eventname, registration, generation, properties) VALUES (?, ?, ?, ?, ?) USING TTL ?").setConsistencyLevel(ConsistencyLevel.QUORUM)
   // No limit on these query because Cassandra manage auto paging
-  val eventsRangeStmt = session.prepare("SELECT * FROM events WHERE providerid = ? AND eventname = ? AND generation >= ? AND generation <= ?;")
-  val metricsRangeStmt = session.prepare("SELECT * FROM metrics WHERE providerid = ? AND metricname = ? AND generation >= ? AND generation <= ?;")
+  val eventsRangeStmt = session.prepare("SELECT * FROM events WHERE providerid = ? AND eventname = ? AND generation >= ? AND generation <= ?;").setConsistencyLevel(ConsistencyLevel.QUORUM)
+  val metricsRangeStmt = session.prepare("SELECT * FROM metrics WHERE providerid = ? AND metricname = ? AND generation >= ? AND generation <= ?;").setConsistencyLevel(ConsistencyLevel.QUORUM)
 
   /**
    * Save the Message if the Provider exists 
@@ -86,8 +94,9 @@ class CassandraActor extends Actor with ActorLogging with ConfigCassandraCluster
     
     Future {
       message match {
-        case m: Metric => checkProviderAndExec(insertMetricStmt.bind(m.provider, m.name, new Date(), new Date(m.emission),  m.value:java.lang.Double))
-        case e: Event => checkProviderAndExec(insertEventStmt.bind(e.provider, e.name, new Date(), new Date(e.emission), mapAsJavaMap(e.properties)))
+        // TODO make TTL configurable during the Event/Metric declaration ??
+        case m: Metric => checkProviderAndExec(insertMetricStmt.bind(m.provider, m.name, new Date(), new Date(m.emission),  m.value:java.lang.Double, eventsTtl:java.lang.Integer))
+        case e: Event => checkProviderAndExec(insertEventStmt.bind(e.provider, e.name, new Date(), new Date(e.emission), mapAsJavaMap(e.properties), metricsTtl:java.lang.Integer))
       }
     }
   }
@@ -149,6 +158,25 @@ class CassandraActor extends Actor with ActorLogging with ConfigCassandraCluster
     } 
   }
   
+  def deleteProvider(provider: String): Future[OgmiosStatus] = {
+    Future {
+        val rs = session.execute(selectProviderStmt.bind(provider))
+        val extractedLocalValue = rs.iterator() 
+        if ( extractedLocalValue.hasNext()) {
+          log.debug(s"provider ${provider} exists, delete can be performed")
+          
+          // metrics and events are saved with a ttl so cassandra will removed them automatically
+          
+          session.execute(deleteProviderStmt.bind(provider))
+          
+          new OpCompleted(OgmiosStatus.StateOk)
+        } else  {
+          log.debug(s"provider with id ${provider} is unknown, return NO_CONTENT status");
+          new OpCompleted(OgmiosStatus.StateOk)
+        }
+    } 
+  }
+  
   /**
    * This method allow to read a row with the id value as primary key.
    * If the row exists, a OpResult is returned with an instance of Provider.
@@ -180,6 +208,7 @@ class CassandraActor extends Actor with ActorLogging with ConfigCassandraCluster
     case Register(provider: Provider) => saveProvider(provider) pipeTo sender
     case Update(provider: Provider) => updateProvider(provider) pipeTo sender
     case Read(id: String) => readProvider(id) pipeTo sender
+    case DeleteProvider(id: String) => deleteProvider(id) pipeTo sender
     case ReadEventsTimeline(provider, name, begin, end) => readMessages(provider, name, begin, end, eventsRangeStmt) pipeTo sender
     case ReadMetricsTimeline(provider, name, begin, end) => readMessages(provider, name, begin, end, metricsRangeStmt) pipeTo sender
   }

@@ -30,6 +30,10 @@ import io.ogmios.core.bean._
 import io.ogmios.core.actor.CassandraActor
 import io.ogmios.core.bean.Provider
 import io.ogmios.core.actor.ActorNames
+import com.datastax.driver.core.ResultSet
+import scala.concurrent.Future
+import java.util.Iterator
+import scala.collection.JavaConversions._
 
 // we don't implement our route structure directly in the service actor because
 // we want to be able to test it independently, without having to spin up an actor
@@ -54,7 +58,7 @@ class OgmiosServiceActor extends Actor with OgmiosService with ActorNames with A
 // this trait defines our service behavior independently from the service actor
 trait OgmiosService extends HttpService {
   
-  // Await timeout
+  // ask timeout
   implicit val timeout = Timeout(2.second)
   // JSON unmarshaller
   implicit val providerJsonFormat = jsonFormat4(Provider)
@@ -91,7 +95,9 @@ trait OgmiosService extends HttpService {
       } ~
       post {
         parameterMap { params =>
-          if (params.contains("event")) {
+          if (params.contains("event") && params.contains("metric")) {
+            throw new InvalidArgumentException("Event and metric can't be sent in the same request")
+          } else if (params.contains("event")) {
             entity(as[Event]) { eventBean =>
               registerMessage(eventBean, providerId)
             }
@@ -110,11 +116,67 @@ trait OgmiosService extends HttpService {
             }
           } 
         }
-      }~
-      get {
+      } ~ 
+      delete {
         complete {
-          ask(cassandraEndPoint, new Read[Provider](providerId)).mapTo[OpResult[Provider]]
-          .map((resultat : OpResult[Provider]) => resultat.value).recover{case ex:Throwable => throw ex}
+          ask (cassandraEndPoint, new DeleteProvider(providerId))
+          .mapTo[OgmiosStatus]
+          .map(_ => NoContent)
+          .recover{case ex:Throwable => throw ex}
+        }
+      } ~
+      get {
+        parameterMap { params =>
+          if (params.contains("type") && !params.contains("name") && !params.contains("begin")) {
+            throw new InvalidArgumentException("Timeline read required some parameter")
+          } else if (params.contains("type") && params.get("type").get == "events") {
+            // return a list of events 
+            val name = params.get("name") match {
+              case Some(str) => str
+              case None =>  throw new InvalidArgumentException("Event name required")
+            }
+            val begin = params.get("begin") match {
+              case Some(str) => str.toLong
+              case None =>  throw new InvalidArgumentException("Event begin date required")
+            }
+            
+            val resultSetFuture = ask (cassandraEndPoint, new ReadEventsTimeline(providerId, name, begin, params.get("end").map(_.toLong)))
+            .mapTo[OpResult[Future[ResultSet]]].flatMap(_.value).recover{case ex:Throwable => throw ex}
+
+            val res = resultSetFuture.map(rs => 
+               for {
+                 r <- rs.all()
+               } yield new Event(r.getString("providerid"), r.getDate("generation").getTime, r.getString("eventname"), r.getMap("properties", classOf[String], classOf[String]).toMap)
+            ).recover{case ex:Throwable => throw ex}
+            
+            complete(res.map(_.toList))
+            
+          } else if (params.contains("type") && params.get("type").get == "metrics") {
+            // return a list of metrics
+            val name = params.get("name") match {
+              case Some(str) => str
+              case None =>  throw new InvalidArgumentException("Event name required")
+            }
+            val begin = params.get("begin") match {
+              case Some(str) => str.toLong
+              case None =>  throw new InvalidArgumentException("Event begin date required")
+            }
+            
+            val resultSetFuture = ask (cassandraEndPoint, new ReadMetricsTimeline(providerId, name, begin, params.get("end").map(_.toLong)))
+            .mapTo[OpResult[Future[ResultSet]]].flatMap(_.value).recover{case ex:Throwable => throw ex}
+
+            val res = resultSetFuture.map(rs => 
+               for {
+                 r <- rs.all()
+               } yield new Metric(r.getString("providerid"), r.getDate("generation").getTime, r.getString("metricname"), r.getDouble("value"))
+            ).recover{case ex:Throwable => throw ex}
+            
+            complete(res.map(_.toList))
+          } else {
+            // Get provider description
+            complete( ask(cassandraEndPoint, new Read[Provider](providerId)).mapTo[OpResult[Provider]]
+                  .map((resultat : OpResult[Provider]) => resultat.value).recover{case ex:Throwable => throw ex})
+          } 
         }
       }
     }
