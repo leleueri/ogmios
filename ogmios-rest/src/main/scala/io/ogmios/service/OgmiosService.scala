@@ -127,59 +127,53 @@ trait OgmiosService extends HttpService {
       } ~
       get {
         parameterMap { params =>
-          if (params.contains("type") && !params.contains("name") && !params.contains("begin")) {
-            throw new InvalidArgumentException("Timeline read required some parameter")
-          } else if (params.contains("type") && params.get("type").get == "events") {
-            // return a list of events 
-            val name = params.get("name") match {
-              case Some(str) => str
-              case None =>  throw new InvalidArgumentException("Event name required")
-            }
-            val begin = params.get("begin") match {
-              case Some(str) => str.toLong
-              case None =>  throw new InvalidArgumentException("Event begin date required")
-            }
+          complete {
             
-            val resultSetFuture = ask (cassandraEndPoint, new ReadEventsTimeline(providerId, name, begin, params.get("end").map(_.toLong)))
-            .mapTo[OpResult[Future[ResultSet]]].flatMap(_.value).recover{case ex:Throwable => throw ex}
-
-            val res = resultSetFuture.map(rs => 
-               for {
-                 r <- rs.all()
-               } yield new Event(r.getString("providerid"), r.getDate("generation").getTime, r.getString("eventname"), r.getMap("properties", classOf[String], classOf[String]).toMap)
-            ).recover{case ex:Throwable => throw ex}
-            
-            complete(res.map(_.toList))
-            
-          } else if (params.contains("type") && params.get("type").get == "metrics") {
-            // return a list of metrics
-            val name = params.get("name") match {
-              case Some(str) => str
-              case None =>  throw new InvalidArgumentException("Event name required")
-            }
-            val begin = params.get("begin") match {
-              case Some(str) => str.toLong
-              case None =>  throw new InvalidArgumentException("Event begin date required")
-            }
-            
-            val resultSetFuture = ask (cassandraEndPoint, new ReadMetricsTimeline(providerId, name, begin, params.get("end").map(_.toLong)))
-            .mapTo[OpResult[Future[ResultSet]]].flatMap(_.value).recover{case ex:Throwable => throw ex}
-
-            val res = resultSetFuture.map(rs => 
-               for {
-                 r <- rs.all()
-               } yield new Metric(r.getString("providerid"), r.getDate("generation").getTime, r.getString("metricname"), r.getDouble("value"))
-            ).recover{case ex:Throwable => throw ex}
-            
-            complete(res.map(_.toList))
-          } else {
-            // Get provider description
-            complete( ask(cassandraEndPoint, new Read[Provider](providerId)).mapTo[OpResult[Provider]]
-                  .map((resultat : OpResult[Provider]) => resultat.value).recover{case ex:Throwable => throw ex})
-          } 
+              if (params.contains("type") && !params.contains("name") && !params.contains("begin")) {
+                throw new InvalidArgumentException("Timeline read required some parameter")
+              } else if (params.contains("type") && params.get("type").get == "events") {
+                // return a list of events 
+                val (name, begin, end) = extractReadTimeLineParams(params)
+                
+                ask(cassandraEndPoint, new ReadEventsTimeline(providerId, name, begin, end))
+                .mapTo[OpResult[List[Event]]].map(_.value).recover{case ex:Throwable => throw ex}
+    
+              } else if (params.contains("type") && params.get("type").get == "metrics") {
+                // return a list of metrics
+                val (name, begin, end) = extractReadTimeLineParams(params)
+                
+                ask (cassandraEndPoint, new ReadMetricsTimeline(providerId, name, begin, end))
+                .mapTo[OpResult[List[Metric]]].map(_.value).recover{case ex:Throwable => throw ex}
+                
+              } else {
+                // Get provider description
+                ask(cassandraEndPoint, new Read[Provider](providerId))
+                .mapTo[OpResult[Provider]]
+                .map((resultat : OpResult[Provider]) => resultat.value).recover{case ex:Throwable => throw ex}
+              }
+          }
         }
       }
     }
+  }
+  
+  /**
+   * return tuple with the "name" and "begin" parameters and an Option[end] parameter.
+   * If name and / or begin parameters are missing from the request, an InvalidArgumentException is thrown
+   */
+  def extractReadTimeLineParams(params : Map[String, String]) : Tuple3[String, Long, Option[Long]]= {
+    val name = params.get("name") match {
+      case Some(str) => str
+      case None =>  throw new InvalidArgumentException("Event name required")
+    }
+    
+    val begin = params.get("begin") match {
+      case Some(str) => str.toLong
+      case None =>  throw new InvalidArgumentException("Event begin date required")
+    }
+    
+    (name, begin, params.get("end").map(_.toLong))
+    
   }
   
   def registerMessage[T <: Message](message: T, providerId: String) : Route = {

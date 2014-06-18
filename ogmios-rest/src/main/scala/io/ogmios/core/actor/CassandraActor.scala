@@ -1,8 +1,7 @@
 package io.ogmios.core.actor
 
 import java.util.Date
-import scala.collection.JavaConversions.mapAsJavaMap
-import scala.collection.JavaConversions.mapAsScalaMap
+import scala.collection.JavaConversions._
 import scala.concurrent.Future
 import scala.concurrent.Promise
 import io.ogmios.core.action.Read
@@ -42,6 +41,7 @@ import io.ogmios.exception.OgmiosException
 import com.datastax.driver.core.ConsistencyLevel
 import io.ogmios.core.config.OgmiosConfig
 import io.ogmios.core.action.DeleteProvider
+import com.datastax.driver.core.ResultSetFuture
 
 /**
  * Licensed under the Apache License, Version 2.0 (the "License");
@@ -101,7 +101,7 @@ with OgmiosConfig {
     }
   }
   
-  def readMessages(provider: String, name: String, begin: Long, end: Option[Long], statement: PreparedStatement): Future[OgmiosStatus] = {
+  def readMetrics(provider: String, name: String, begin: Long, end: Option[Long]): Future[OgmiosStatus] = {
     val endOrNow = end.getOrElse(System.currentTimeMillis())    
     // reorder range parameters
     val startDate = new Date(begin.min(endOrNow))
@@ -110,10 +110,33 @@ with OgmiosConfig {
     Future {
       val resultSet = session.execute(selectProviderStmt.bind(provider))
       if (resultSet.iterator().hasNext()) {
-          // to allow chuncked response, the OpResult will contain the ResultSetFuture
-          new OpResult(OgmiosStatus.StateOk, toFuture(session.executeAsync(statement.bind(provider, name, startDate, endDate)))) 
+        val rs = session.execute(metricsRangeStmt.bind(provider, name, startDate, endDate))
+        val metrics = for {
+          r <- rs.all
+        } yield new Metric(r.getString("providerid"), r.getDate("generation").getTime, r.getString("metricname"), r.getDouble("value")) 
+        new OpResult(OgmiosStatus.StateOk, metrics.toList) 
       } else {
-          throw new NotFoundException(s"Provider ${provider} is unknown")  
+        throw new NotFoundException(s"Provider ${provider} is unknown")  
+      }
+    }
+  }
+  
+  def readEvents(provider: String, name: String, begin: Long, end: Option[Long]): Future[OgmiosStatus] = {
+    val endOrNow = end.getOrElse(System.currentTimeMillis())    
+    // reorder range parameters
+    val startDate = new Date(begin.min(endOrNow))
+    val endDate = new Date(begin.max(endOrNow))
+    
+    Future {
+      val resultSet = session.execute(selectProviderStmt.bind(provider))
+      if (resultSet.iterator().hasNext()) {
+        val rs = session.execute(eventsRangeStmt.bind(provider, name, startDate, endDate))
+        val events = for {
+          r <- rs.all
+        } yield new Event(r.getString("providerid"), r.getDate("generation").getTime, r.getString("eventname"), r.getMap("properties", classOf[String], classOf[String]).toMap) 
+        new OpResult(OgmiosStatus.StateOk, events.toList) 
+      } else {
+        throw new NotFoundException(s"Provider ${provider} is unknown")  
       }
     }
   }
@@ -209,7 +232,7 @@ with OgmiosConfig {
     case Update(provider: Provider) => updateProvider(provider) pipeTo sender
     case Read(id: String) => readProvider(id) pipeTo sender
     case DeleteProvider(id: String) => deleteProvider(id) pipeTo sender
-    case ReadEventsTimeline(provider, name, begin, end) => readMessages(provider, name, begin, end, eventsRangeStmt) pipeTo sender
-    case ReadMetricsTimeline(provider, name, begin, end) => readMessages(provider, name, begin, end, metricsRangeStmt) pipeTo sender
+    case ReadEventsTimeline(provider, name, begin, end) => readEvents(provider, name, begin, end) pipeTo sender
+    case ReadMetricsTimeline(provider, name, begin, end) => readMetrics(provider, name, begin, end) pipeTo sender
   }
 }

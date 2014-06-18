@@ -2,38 +2,33 @@ package io.ogmios.core.actor
 
 import scala.collection.immutable.Map
 import scala.concurrent.Await
-import scala.concurrent.TimeoutException
 import scala.concurrent.duration.DurationInt
+import scala.util.Failure
 import scala.util.Success
-import io.ogmios.core.action.Read
-import io.ogmios.core.action.Register
-import io.ogmios.core.action.Update
-import io.ogmios.core.bean.OpResult
-import io.ogmios.core.bean.Provider
-import io.ogmios.core.bean.OgmiosStatus
+
 import org.scalatest.BeforeAndAfterAll
 import org.scalatest.Matchers
 import org.scalatest.WordSpecLike
+
 import akka.actor.ActorSystem
 import akka.actor.Props
 import akka.pattern.ask
 import akka.testkit.ImplicitSender
 import akka.testkit.TestKit
-import io.ogmios.core.bean.Metric
-import io.ogmios.core.bean.Event
-import io.ogmios.core.action.ReadMetricsTimeline
-import com.datastax.driver.core.ResultSet
-import io.ogmios.core.action.ReadEventsTimeline
-import io.ogmios.core.bean.OpResult
-import scala.concurrent.Future
-import com.datastax.driver.core.ResultSetFuture
-import scala.util.Success
-import scala.util.Success
-import scala.concurrent.ExecutionContext.Implicits.global
-import scala.util.Failure
-import io.ogmios.exception.NotFoundException
-import io.ogmios.exception.ConflictException
+import akka.util.Timeout.durationToTimeout
 import io.ogmios.core.action.DeleteProvider
+import io.ogmios.core.action.Read
+import io.ogmios.core.action.ReadEventsTimeline
+import io.ogmios.core.action.ReadMetricsTimeline
+import io.ogmios.core.action.Register
+import io.ogmios.core.action.Update
+import io.ogmios.core.bean.Event
+import io.ogmios.core.bean.Metric
+import io.ogmios.core.bean.OgmiosStatus
+import io.ogmios.core.bean.OpResult
+import io.ogmios.core.bean.Provider
+import io.ogmios.exception.ConflictException
+import io.ogmios.exception.NotFoundException
 
 class TestProviderActor(_system: ActorSystem) extends TestKit(_system) with ImplicitSender
 with WordSpecLike with Matchers with BeforeAndAfterAll with ActorNames {
@@ -97,24 +92,16 @@ with WordSpecLike with Matchers with BeforeAndAfterAll with ActorNames {
             case _ => fail
           }
           
-           val futureTimeline = ask(cassandra, new ReadMetricsTimeline(providerId, "mName", start, None))(10.second).mapTo[OpResult[Future[ResultSet]]];
+           val futureTimeline = ask(cassandra, new ReadMetricsTimeline(providerId, "mName", start, None))(10.second).mapTo[OpResult[List[Metric]]];
            Await.ready(futureTimeline, 10.second)
            futureTimeline.value match {
-             case Some(s: Success[OpResult[Future[ResultSet]]]) => checkReadTimeline(s.get.value, 2)
+             case Some(s: Success[OpResult[List[Metric]]]) => s.value.value.size shouldBe 2
              case _ => fail
            }
            
            val futureDelete = ask(cassandra, new DeleteProvider(providerId))(10.second);
            Await.ready(futureDelete, 10.second)
         }
-    }
-    
-    def checkReadTimeline(future: Future[ResultSet], size: Int) {
-      Await.ready(future, 10.second)
-           future.value match {
-             case Some(s: Success[ResultSet]) => s.get.all().size() shouldBe size
-             case _ => fail
-           }
     }
     
     "A Cassandra Actor" must {
@@ -149,10 +136,10 @@ with WordSpecLike with Matchers with BeforeAndAfterAll with ActorNames {
            }
            
            // test without end date
-           val futureTimeline = ask(cassandra, new ReadEventsTimeline(providerId, "eName", start, None))(10.second).mapTo[OpResult[Future[ResultSet]]];
+           val futureTimeline = ask(cassandra, new ReadEventsTimeline(providerId, "eName", start, None))(10.second).mapTo[OpResult[List[Event]]];
            Await.ready(futureTimeline, 10.second)
            futureTimeline.value match {
-             case Some(s: Success[OpResult[Future[ResultSet]]]) => checkReadTimeline(s.get.value, 2)
+             case Some(s: Success[OpResult[List[Event]]]) => s.value.value.size shouldBe 2
              case _ => fail
            }
                       
