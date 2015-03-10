@@ -14,8 +14,3 @@ The other goal is clearly to provide me a way to learn Scala and linked stack...
 Currently, Ogmios can perform CRUD actions on provider, create/read events and metrics.
 The beans (provider/metric/event) will evolve according to implementation requirements.
 
-
-Why Ogmios  ?
-
-Ogmios is the celtic God of Knowledge. I hope that metrics registered by Ogmios will allow in a early future some data analysis.
-
