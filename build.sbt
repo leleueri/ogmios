@@ -22,7 +22,6 @@ libraryDependencies ++= {
 
     "com.datastax.cassandra" % "cassandra-driver-core" % "2.1.4",
 
-
     "org.scalatest" %% "scalatest" % scalaTestV % "test"
   )
 }

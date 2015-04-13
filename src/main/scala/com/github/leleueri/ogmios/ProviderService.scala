@@ -124,14 +124,19 @@ trait ProviderService extends Protocols with ConfigCassandraCluster with Cassand
   def createProvider(provId: String, provider: Provider): StatusCode = {
     if (logger.isDebugEnabled) logger.debug("Creation of provider '{}' : {}", provId, provider)
 
+    if (provider.id != provId) {
+      logger.info("Param 'providerId' should be the same as the one present into the bean")
+      throw new ProviderInvalid("Param 'providerId' is inconsistent with the one present into the bean")
+    }
+
     val rs = session.execute(insertStmt.bind()
       .setString(COL_ID, provId)
       .setString(COL_NAME, provider.name)
       .setString(COL_DESC, provider.desc.orNull)
-      .setDate(COL_REG, new Date(LocalDateTime.parse(provider.creationDate.getOrElse(DateTime.now).toIsoDateTimeString()).toEpochSecond(ZoneOffset.UTC))) // ugly...
+      .setDate(COL_REG, new Date(LocalDateTime.parse(provider.creationDate.getOrElse(DateTime.now).toIsoDateTimeString()).toInstant(ZoneOffset.UTC).toEpochMilli)) // ugly...
       .setSet(COL_EVT, provider.eventTypes))
 
-    if (rs.wasApplied()) StatusCodes.OK else {
+    if (rs.wasApplied()) StatusCodes.Created else {
       logger.info("provider '{}' already exists", provId)
       StatusCodes.Conflict
     }
@@ -139,6 +144,11 @@ trait ProviderService extends Protocols with ConfigCassandraCluster with Cassand
 
   def updateProvider(provId: String, provider: Provider): StatusCode = {
     if (logger.isDebugEnabled) logger.debug("Creation of provider '{}' : {}", provId, provider)
+
+    if (provider.id != provId) {
+      logger.info("Param 'providerId' should be the same as the one present into the bean")
+      throw new ProviderInvalid("Param 'providerId' is inconsistent with the one present into the bean")
+    }
 
     val rs = session.execute(readStmt.bind().setString(COL_ID, provId))
     if (rs.one() == null) throw new ProviderNotFound("Provider '" + provId + "' doesn't exists")
