@@ -1,4 +1,4 @@
-package io.ogmios.core.actor
+package com.github.leleueri.scalandra
 
 import scala.util.Success
 import com.datastax.driver.core.{BoundStatement, ResultSet, ResultSetFuture}
@@ -12,8 +12,8 @@ import concurrent.TimeoutException
 
 // COPY/PASTE from akka/cassandra activator
 
-private[actor] trait CassandraResultSetOperations {
-  
+trait CassandraResultSetOperations {
+
   private case class ExecutionContextExecutor(executonContext: ExecutionContext) extends java.util.concurrent.Executor {
     def execute(command: Runnable): Unit = { executonContext.execute(command) }
   }
@@ -70,7 +70,7 @@ trait BoundStatementOperations {
 
 }
 
-object cassandra {
+object Cassandra {
 
   object resultset extends CassandraResultSetOperations
 

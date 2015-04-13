@@ -1,4 +1,4 @@
-package io.ogmios.core.config
+package com.github.leleueri.scalandra
 
 /**
  * Licensed under the Apache License, Version 2.0 (the "License");
@@ -14,30 +14,34 @@ package io.ogmios.core.config
  * limitations under the License.
  */
 // COPY/PASTE from the Akka/Cassandra activator
-
-import com.datastax.driver.core.{ProtocolOptions, Cluster}
+import com.datastax.driver.core.{ConsistencyLevel, ProtocolOptions, Cluster}
 import akka.actor.ActorSystem
+import com.typesafe.config.Config
 
 trait CassandraCluster {
   def cluster: Cluster
 }
 
 trait ConfigCassandraCluster extends CassandraCluster {
-  def system: ActorSystem
 
-  private def config = {
-    system.settings.config
-  }
+  def keyspace: String
+
+  def config: Config
 
   import scala.collection.JavaConversions._
-  private val cassandraConfig = config.getConfig("akka-cassandra.main.db.cassandra")
-  private val port = cassandraConfig.getInt("port")
-  private val hosts = cassandraConfig.getStringList("hosts").toList
+
+  private lazy val cassandraConfig = config.getConfig("cassandra.cluster.connection")
+  private lazy val port = cassandraConfig.getInt("port")
+  private lazy val hosts = cassandraConfig.getStringList("hosts").toList
+
+  private lazy val keyspaceConfig = config.getConfig("cassandra.cluster.keyspaces").getConfig(keyspace)
 
   lazy val cluster: Cluster =
     Cluster.builder().
       addContactPoints(hosts: _*).
-      withCompression(ProtocolOptions.Compression.SNAPPY).
       withPort(port).
       build()
+
+  lazy val readConsistency: ConsistencyLevel = ConsistencyLevel.valueOf(keyspaceConfig.getString("readConsistency"))
+  lazy val writeConsistency: ConsistencyLevel = ConsistencyLevel.valueOf(keyspaceConfig.getString("writeConsistency"))
 }
