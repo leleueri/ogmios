@@ -28,3 +28,5 @@ nohup
 .idea/
 ogmios-rest/.settings/ $
 ogmios-rest/.settings/
+.idea_modules/
+projectFilesBackup/

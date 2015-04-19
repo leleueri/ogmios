@@ -9,3 +9,13 @@ description varchar,
 registration timestamp,
 eventTypes set<varchar>
 );
+
+CREATE TABLE IF NOT EXISTS eventtypes (
+id varchar,
+provid varchar,
+description varchar,
+registration timestamp,
+type varchar,
+unit varchar,
+PRIMARY KEY (provid, id)
+);

@@ -12,7 +12,7 @@ import akka.http.server.ExceptionHandler
 import akka.http.server.PathMatchers.Segment
 import akka.http.util.DateTime
 import akka.stream.FlowMaterializer
-import com.datastax.driver.core.{Row, ResultSet}
+import com.datastax.driver.core.{Session, Row, ResultSet}
 import com.datastax.driver.core.exceptions.{NoHostAvailableException, QueryExecutionException, DriverException}
 import com.github.leleueri.ogmios.protocol.Provider
 import com.github.leleueri.ogmios.protocol.Protocols
@@ -37,7 +37,6 @@ trait ProviderService extends Protocols with ConfigCassandraCluster with Cassand
 
   val logger: LoggingAdapter
 
-  val keyspace = "ogmios"
 
   // List of columns available int he providers ColumnFamily
   val COL_ID: String = "id"
@@ -51,7 +50,7 @@ trait ProviderService extends Protocols with ConfigCassandraCluster with Cassand
   // -----------------
 
   // We have to set these attributes lazy to avoid NullPointer caused by the ConfigCassandraCluster trait
-  lazy val session = cluster.connect(keyspace)
+  def session : Session
   lazy val insertStmt = session.prepare("INSERT INTO providers (id, name, description, registration, eventTypes) VALUES (?,?,?,?,?) IF NOT EXISTS")
   lazy val updateStmt = session.prepare("UPDATE providers SET description = ?, name = ? WHERE id = ?")
   lazy val readStmt = session.prepare("SELECT * FROM providers WHERE id = ?")
@@ -61,7 +60,7 @@ trait ProviderService extends Protocols with ConfigCassandraCluster with Cassand
    * This handler complete the route with a status adapted to the received exception
    * Unmanaged exception are computed by the default spray handler
    */
-  val ogmiosExceptionHandler = ExceptionHandler {
+  val providerExceptionHandler = ExceptionHandler {
     case ex : ProviderNotFound => logger.error(ex.getMessage); complete(StatusCodes.NotFound)
     case ex : ProviderInvalid => logger.error(ex.getMessage); complete(StatusCodes.BadRequest)
     case ex : QueryExecutionException => logger.error("Cassandra Request can't be processed : " + ex.getMessage, ex); complete(StatusCodes.ServiceUnavailable)
@@ -70,8 +69,8 @@ trait ProviderService extends Protocols with ConfigCassandraCluster with Cassand
   }
 
   val providerRoutes = {
-    handleExceptions(ogmiosExceptionHandler) {
-      logRequestResult("akka-http-microservice") {
+    handleExceptions(providerExceptionHandler) {
+      logRequestResult("akka-http-ogmios") {
         pathPrefix("providers") {
           (put & path(Segment)) {
             provId => entity(as[Provider]) {

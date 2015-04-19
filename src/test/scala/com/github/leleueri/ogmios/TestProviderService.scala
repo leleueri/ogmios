@@ -8,6 +8,7 @@ import akka.http.model.StatusCodes._
 import akka.http.testkit.ScalatestRouteTest
 import akka.http.util.DateTime
 import akka.stream.scaladsl.Flow
+import com.github.leleueri.ogmios.OgmiosApp._
 import com.github.leleueri.ogmios.protocol.Provider
 import org.scalatest._
 import spray.json.DefaultJsonProtocol
@@ -17,6 +18,9 @@ class TestProviderService extends FlatSpec with Matchers with ScalatestRouteTest
   override def testConfigSource = "akka.loglevel = DEBUG"
   override def config = testConfig
   override val logger = NoLogging
+
+  val keyspace = "ogmios"
+  lazy val session = cluster.connect(keyspace)
 
   val providerOneId = "providerid-"+System.currentTimeMillis()
   val providerOneBean = new Provider(providerOneId, "name-"+providerOneId, None, Set.empty, None)

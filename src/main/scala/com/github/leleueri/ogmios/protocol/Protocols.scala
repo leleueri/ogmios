@@ -1,7 +1,7 @@
 package com.github.leleueri.ogmios.protocol
 
-import java.util.UUID
 
+import akka.http.marshallers.sprayjson.SprayJsonSupport
 import akka.http.util.DateTime
 import spray.json._
 
@@ -23,13 +23,12 @@ case class Provider(val id: String, val name: String, val desc: Option[String], 
 /**
  *
  * @param id
- * @param name
  * @param unit
  * @param valueType
  * @param provider
  * @param creationDate
  */
-case class EventType(val id: String, val name: String, val unit: Option[String], val valueType: String, val provider: String, val creationDate: Option[DateTime])
+case class EventType(val id: String, val unit: Option[String], val valueType: String, val provider: String, val creationDate: Option[DateTime])
 
 /**
  *
@@ -40,7 +39,8 @@ case class EventType(val id: String, val name: String, val unit: Option[String],
  */
 case class Event(val evtType: String, val id: Option[String], val value: String, val creationDate: Option[Long])
 
-trait Protocols extends DefaultJsonProtocol {
+trait Protocols extends DefaultJsonProtocol with SprayJsonSupport { // with SpryJsonSupport to manage List of EventType...
+  import akka.http.marshallers.sprayjson._
 
   // define a DateTime Json Marshaller/Unmarshaller
   // DO NOT use the RootJsonFormat because, DateTime will be convert as String
@@ -50,6 +50,6 @@ trait Protocols extends DefaultJsonProtocol {
   }
 
   implicit val providerJson = jsonFormat5(Provider.apply)
-  implicit val eventTypeJson = jsonFormat6(EventType.apply)
+  implicit val eventTypeJson = jsonFormat5(EventType.apply)
   implicit val eventJson = jsonFormat4(Event.apply)
 }
