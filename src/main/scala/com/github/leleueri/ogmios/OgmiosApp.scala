@@ -10,8 +10,8 @@ import akka.http.server.{Route, RouteConcatenation}
 /**
  * Created by eric on 24/03/15.
  */
-object OgmiosApp extends App with ProviderService with EventTypeService with RouteConcatenation {
-  override implicit val system = ActorSystem()
+object OgmiosApp extends App with ProviderService with RouteConcatenation {
+  implicit val system = ActorSystem()
   override implicit val executor = system.dispatcher
   override implicit val materializer = ActorFlowMaterializer()
 

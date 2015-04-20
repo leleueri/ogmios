@@ -27,7 +27,7 @@ class TestProviderService extends FlatSpec with Matchers with ScalatestRouteTest
 
   override def afterEach() {
     // after each test case, remove the provider from cassandra
-    session.execute(deleteStmt.bind().setString(COL_ID, providerOneId))
+    session.execute(deleteProvStmt.bind().setString(COL_PROV_ID, providerOneId))
   }
 
   "Service" should "respond NOT_FOUND on missing providers" in {

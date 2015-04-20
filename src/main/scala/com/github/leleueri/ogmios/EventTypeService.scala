@@ -28,22 +28,22 @@ import scala.concurrent.{ExecutionContextExecutor, Future}
 
 
 
-trait EventTypeService extends Protocols with ConfigCassandraCluster with CassandraResultSetOperations {
+trait EventService extends Protocols with ConfigCassandraCluster with CassandraResultSetOperations {
 
-  implicit val system: ActorSystem
+  //implicit val system: ActorSystem
 
   implicit def executor: ExecutionContextExecutor
 
   implicit val materializer: FlowMaterializer
 
   val logger: LoggingAdapter
-
+/*
 
   // List of columns available int he providers ColumnFamily
   val COL_EVT_ID: String = "id"
-  val COL_PROV: String = "provid"
-  val COL_UNIT: String = "unit"
-  val COL_TYPE: String = "type"
+  val COL_EVT_PROV: String = "provid"
+  val COL_EVT_UNIT: String = "unit"
+  val COL_EVT_TYPE: String = "type"
   val COL_EVT_REG: String = "registration"
 
   // -----------------
@@ -125,7 +125,7 @@ trait EventTypeService extends Protocols with ConfigCassandraCluster with Cassan
 
   def readEventsFor(provId: String): Future[List[EventType]] = {
     logger.debug("Read event types for provider '{}'", provId)
-    toFuture(session.executeAsync(readAllTypesStmt.bind().setString(COL_PROV, provId)))
+    toFuture(session.executeAsync(readAllTypesStmt.bind().setString(COL_EVT_PROV, provId)))
       .map(rs => {
           val iter = rs.iterator()
           createEventList(iter, List())
@@ -138,29 +138,29 @@ trait EventTypeService extends Protocols with ConfigCassandraCluster with Cassan
     if (!iter.hasNext) acc
     else {
       val row = iter.next()
-      val evt = new EventType(row.getString(COL_EVT_ID), Option(row.getString(COL_UNIT)), row.getString(COL_TYPE), row.getString(COL_PROV),  Option(DateTime(row.getDate(COL_EVT_REG).getTime)))
+      val evt = new EventType(row.getString(COL_EVT_ID), Option(row.getString(COL_EVT_UNIT)), row.getString(COL_EVT_TYPE), row.getString(COL_EVT_PROV),  Option(DateTime(row.getDate(COL_EVT_REG).getTime)))
       createEventList(iter, evt :: acc)
     }
   }
 
   def deleteEventsFor(provId: String): StatusCode = {
     logger.debug("Delete event types for provider '{}'", provId)
-    val rs = session.execute(deleteAllTypesStmt.bind().setString(COL_PROV, provId))
+    val rs = session.execute(deleteAllTypesStmt.bind().setString(COL_EVT_PROV, provId))
     StatusCodes.NoContent
   }
 
   def deleteEventType(provId: String, evt: String): StatusCode = {
     logger.debug("Delete event '{}' for provider '{}'", evt, provId)
-    val rs = session.execute(deleteEvtTypeStmt.bind().setString(COL_PROV, provId).setString(COL_EVT_ID, evt))
+    val rs = session.execute(deleteEvtTypeStmt.bind().setString(COL_EVT_PROV, provId).setString(COL_EVT_ID, evt))
     StatusCodes.NoContent
   }
 
   def readEventType(provId: String, evt: String): Future[EventType] = {
     logger.debug("Read event '{}' for provider '{}'", evt, provId)
-    toFuture(session.executeAsync(readEvtTypeStmt.bind().setString(COL_PROV, provId).setString(COL_EVT_ID, evt)))
+    toFuture(session.executeAsync(readEvtTypeStmt.bind().setString(COL_EVT_PROV, provId).setString(COL_EVT_ID, evt)))
       .map(rs => {
         Option(rs.one()).map(row => {
-          new EventType(row.getString(COL_EVT_ID), Option(row.getString(COL_UNIT)), row.getString(COL_TYPE), row.getString(COL_PROV),  Option(DateTime(row.getDate(COL_EVT_REG).getTime)))
+          new EventType(row.getString(COL_EVT_ID), Option(row.getString(COL_EVT_UNIT)), row.getString(COL_EVT_TYPE), row.getString(COL_EVT_PROV),  Option(DateTime(row.getDate(COL_EVT_REG).getTime)))
         }
       ).getOrElse(throw new EventTypeNotFound("EventType " + evt + " doesn't exist for the provider " + provId))
     })
@@ -183,14 +183,14 @@ trait EventTypeService extends Protocols with ConfigCassandraCluster with Cassan
 
     val rs = session.execute(insertEvtTypeStmt.bind()
       .setString(COL_EVT_ID, evtId)
-      .setString(COL_PROV, provId)
+      .setString(COL_EVT_PROV, provId)
       .setDate(COL_EVT_REG, new Date(LocalDateTime.parse(event.creationDate.getOrElse(DateTime.now).toIsoDateTimeString()).toInstant(ZoneOffset.UTC).toEpochMilli)) // ugly...
-      .setString(COL_UNIT, event.unit.orNull).setString(COL_TYPE, event.valueType))
+      .setString(COL_EVT_UNIT, event.unit.orNull).setString(COL_EVT_TYPE, event.valueType))
 
     if (rs.wasApplied()) StatusCodes.Created else {
       logger.info("provider '{}' already exists", provId)
       StatusCodes.Conflict
     }
-  }
+  }*/
 }
 
