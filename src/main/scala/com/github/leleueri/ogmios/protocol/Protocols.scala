@@ -18,7 +18,7 @@ import spray.json._
  * @param desc
  * @param eventTypes
  */
-case class Provider(val id: String, val name: String, val desc: Option[String], val eventTypes : Set[String], val creationDate: Option[DateTime])
+case class Provider(id: String, name: String, desc: Option[String], eventTypes : Set[String], creationDate: Option[DateTime])
 
 /**
  *
@@ -28,16 +28,17 @@ case class Provider(val id: String, val name: String, val desc: Option[String], 
  * @param provider
  * @param creationDate
  */
-case class EventType(val id: String, val unit: Option[String], val valueType: String, val provider: String, val creationDate: Option[DateTime])
+case class EventType(id: String, unit: Option[String], valueType: String, provider: String, creationDate: Option[DateTime])
 
 /**
  *
- * @param evtType
  * @param id
  * @param value
  * @param creationDate
  */
-case class Event(val evtType: String, val id: Option[String], val value: String, val creationDate: Option[Long])
+case class Event(id: Option[String], value: String, creationDate: Option[DateTime])
+
+case class Error(category: String, message: String)
 
 trait Protocols extends DefaultJsonProtocol with SprayJsonSupport { // with SpryJsonSupport to manage List of EventType...
   import akka.http.marshallers.sprayjson._
@@ -51,5 +52,6 @@ trait Protocols extends DefaultJsonProtocol with SprayJsonSupport { // with Spry
 
   implicit val providerJson = jsonFormat5(Provider.apply)
   implicit val eventTypeJson = jsonFormat5(EventType.apply)
-  implicit val eventJson = jsonFormat4(Event.apply)
+  implicit val eventJson = jsonFormat3(Event.apply)
+  implicit val errorJson = jsonFormat2(Error.apply)
 }

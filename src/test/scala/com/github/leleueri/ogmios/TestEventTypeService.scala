@@ -31,7 +31,7 @@ class TestEventTypeService extends FlatSpec with Matchers with ScalatestRouteTes
     session.execute(deleteProvStmt.bind().setString(COL_PROV_ID, providerOneId))
 
     // after each test case, remove all types of event fo the provider from cassandra
-    session.execute(deleteAllTypesStmt.bind().setString(COL_EVT_PROV, providerOneId))
+    session.execute(deleteAllTypesStmt.bind().setString(COL_EVT_TYPE_PROV, providerOneId))
   }
 
   "Service" should "respond NOT_FOUND on unknown provider" in {
@@ -52,17 +52,6 @@ class TestEventTypeService extends FlatSpec with Matchers with ScalatestRouteTes
       content isEmpty
     }
   }
-
-/* it should "respond BAD_REQUEST if the request body is empty" in {
-    Put(s"/providers/$providerOneId", providerOneBean) ~> providerRoutes ~> check {
-      status shouldBe Created
-    }
-
-    Put(s"/providers/$providerOneId/event-types/$firstEvent.id") ~> eventTypeRoutes ~> check {
-      status shouldBe BadRequest
-    }
-  }*/ // TODO how to handle  Rejected(List(MalformedRequestContentRejection(Unexpected end-of-input at input index 0 (line 1, position 1), expected JSON Value:
-
 
   it should "respond BAD_REQUEST if provideId are inconsistent on PUT request" in {
     Put(s"/providers/$providerOneId", providerOneBean) ~> providerRoutes ~> check {

@@ -19,3 +19,12 @@ type varchar,
 unit varchar,
 PRIMARY KEY (provid, id)
 );
+
+CREATE TABLE IF NOT EXISTS events (
+id timeuuid,
+provid varchar,
+evttype varchar,
+registration timestamp,
+value varchar,
+PRIMARY KEY (provid, evttype, id)
+);

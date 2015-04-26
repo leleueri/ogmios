@@ -8,6 +8,8 @@ scalaVersion := "2.11.6"
 
 scalacOptions := Seq("-unchecked", "-deprecation", "-encoding", "utf8")
 
+resolvers += "TimeUUID for Cassandra" at "http://eaio.com/maven2"
+
 libraryDependencies ++= {
   val akkaV = "2.3.9"
   val akkaStreamV = "1.0-M5"
@@ -21,6 +23,7 @@ libraryDependencies ++= {
     "com.typesafe.akka" %% "akka-http-testkit-experimental" % akkaStreamV,
 
     "com.datastax.cassandra" % "cassandra-driver-core" % "2.1.4",
+    "com.eaio.uuid" % "uuid" % "3.4",
 
     "org.scalatest" %% "scalatest" % scalaTestV % "test"
   )

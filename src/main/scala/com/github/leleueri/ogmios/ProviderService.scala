@@ -6,7 +6,8 @@ import java.util.concurrent.Executors
 
 import akka.actor.ActorSystem
 import akka.event.LoggingAdapter
-import akka.http.model.{StatusCode, StatusCodes}
+import akka.http.model.headers.{Location, CustomHeader}
+import akka.http.model.{HttpHeader, StatusCode, StatusCodes}
 import akka.http.server.Directives._
 import akka.http.server.ExceptionHandler
 import akka.http.server.PathMatchers.Segment
@@ -14,7 +15,7 @@ import akka.http.util.DateTime
 import akka.stream.FlowMaterializer
 import com.datastax.driver.core.{Session, Row, ResultSet}
 import com.datastax.driver.core.exceptions.{NoHostAvailableException, QueryExecutionException, DriverException}
-import com.github.leleueri.ogmios.protocol.{EventType, Provider, Protocols}
+import com.github.leleueri.ogmios.protocol._
 import com.github.leleueri.scalandra.{CassandraResultSetOperations, ConfigCassandraCluster, CassandraCluster}
 import com.typesafe.config.Config
 import akka.http.marshallers.sprayjson.SprayJsonSupport._
@@ -39,19 +40,24 @@ trait ProviderService extends Protocols with ConfigCassandraCluster with Cassand
   val logger: LoggingAdapter
 
 
-  // List of columns available int he providers & eventTypes ColumnFamily
+  // List of columns available in the providers ColumnFamily
   val COL_PROV_ID: String = "id"
   val COL_PROV_NAME: String = "name"
   val COL_PROV_DESC: String = "description"
   val COL_PROV_REG: String = "registration"
   val COL_PROV_EVT: String = "eventTypes"
-
+  // List of columns available in the eventTypes ColumnFamily
+  val COL_EVT_TYPE_ID: String = "id"
+  val COL_EVT_TYPE_PROV: String = "provid"
+  val COL_EVT_TYPE_UNIT: String = "unit"
+  val COL_EVT_TYPE: String = "type"
+  val COL_EVT_TYPE_REG: String = "registration"
+  // List of columns available in the events ColumnFamily
   val COL_EVT_ID: String = "id"
   val COL_EVT_PROV: String = "provid"
-  val COL_EVT_UNIT: String = "unit"
-  val COL_EVT_TYPE: String = "type"
+  val COL_EVT_ETID: String = "evttype"
   val COL_EVT_REG: String = "registration"
-
+  val COL_EVT_VALUE: String = "value"
 
   // -----------------
   // PreparedStatement
@@ -69,18 +75,26 @@ trait ProviderService extends Protocols with ConfigCassandraCluster with Cassand
   lazy val deleteEvtTypeStmt = session.prepare("DELETE FROM eventtypes WHERE provid = ? and id = ?")
   lazy val readAllTypesStmt = session.prepare("SELECT * FROM eventtypes WHERE provid = ?")
   lazy val deleteAllTypesStmt = session.prepare("DELETE FROM eventtypes WHERE provid = ?")
+
+  lazy val insertEvtStmt = session.prepare("INSERT INTO events (provid, evttype, id, registration, value) VALUES (?,?,?,?,?)")
+  lazy val readEvtStmt = session.prepare("SELECT * FROM events WHERE provid = ? and evttype = ? and id = ?")
+  lazy val readAllEventsStmt = session.prepare("SELECT * FROM events WHERE provid = ? and evttype = ?")
+  lazy val deleteAllEventsStmt = session.prepare("DELETE FROM events WHERE provid = ? and evttype = ?")
+
+
   /**
    * This handler complete the route with a status adapted to the received exception
    * Unmanaged exception are computed by the default spray handler
    */
   val providerExceptionHandler = ExceptionHandler {
-    case ex : ProviderNotFound => logger.error(ex.getMessage); complete(StatusCodes.NotFound)
-    case ex : ProviderInvalid => logger.error(ex.getMessage); complete(StatusCodes.BadRequest)
-    case ex : EventTypeInvalid => logger.error(ex.getMessage); complete(StatusCodes.BadRequest)
-    case ex : EventTypeNotFound => logger.error(ex.getMessage); complete(StatusCodes.NotFound)
-    case ex : QueryExecutionException => logger.error("Cassandra Request can't be processed : " + ex.getMessage, ex); complete(StatusCodes.ServiceUnavailable)
-    case ex : NoHostAvailableException => logger.error("Cassandra Request can't be processed : " + ex.getMessage, ex); complete(StatusCodes.ServiceUnavailable)
-    case x: Exception => logger.error("Unexpected error: " + x.getMessage, x); complete(StatusCodes.InternalServerError)
+    case ex : ProviderNotFound => logger.error(ex.getMessage); complete(StatusCodes.NotFound, Error("provider", ex.getMessage))
+    case ex : ProviderInvalid => logger.error(ex.getMessage); complete(StatusCodes.BadRequest, Error("provider", ex.getMessage))
+    case ex : EventTypeInvalid => logger.error(ex.getMessage); complete(StatusCodes.BadRequest, Error("event-type", ex.getMessage))
+    case ex : EventTypeNotFound => logger.error(ex.getMessage); complete(StatusCodes.NotFound, Error("event-type", ex.getMessage))
+    case ex : EventNotFound => logger.error(ex.getMessage); complete(StatusCodes.NotFound, Error("event", ex.getMessage))
+    case ex : QueryExecutionException => logger.error("Cassandra Request can't be processed : " + ex.getMessage, ex); complete(StatusCodes.ServiceUnavailable, Error("datastore", ex.getMessage))
+    case ex : NoHostAvailableException => logger.error("Cassandra Request can't be processed : " + ex.getMessage, ex); complete(StatusCodes.ServiceUnavailable, Error("datastore", ex.getMessage))
+    case x: Exception => logger.error("Unexpected error: " + x.getMessage, x); complete(StatusCodes.InternalServerError, Error("unknown", x.getMessage))
   }
 
   val providerRoutes = {
@@ -145,11 +159,11 @@ trait ProviderService extends Protocols with ConfigCassandraCluster with Cassand
       logRequestResult("akka-http-ogmios") {
         path("providers"/Segment/"event-types"/Segment) {
           (provId, evtId) => {
-            put {
+            post {
               entity(as[EventType]) {
                 event =>
                   complete {
-                    createEvent(provId, evtId, event)
+                    createEventType(provId, evtId, event)
                   }
               }
             } ~
@@ -162,6 +176,56 @@ trait ProviderService extends Protocols with ConfigCassandraCluster with Cassand
                 Future[StatusCode] {
                   deleteEventType(provId, evtId)
                 }
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+
+
+  val eventsRoutes = {
+    handleExceptions(providerExceptionHandler) {
+      logRequestResult("akka-http-ogmios") {
+        path("providers" / Segment / "event-types" / Segment / "events") {
+          (provId, evtTypeId) => {
+            put {
+              entity(as[Event]) {
+                event =>
+                  val timeuuid = new com.eaio.uuid.UUID().toString
+                  respondWithHeader(Location(s"providers/$provId/event-types/$evtTypeId/events/$timeuuid")) {
+                    complete {
+                      createEvent(provId, evtTypeId, event.copy(id = Some(timeuuid)))
+                    }
+                  }
+              }
+            } ~
+              get {
+                complete {
+                  readEventType(provId, evtTypeId) // TODO
+                }
+              } ~ delete {
+              complete {
+                Future[StatusCode] {
+                  deleteEventType(provId, evtTypeId) // TODO
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+
+  val eventRoutes = {
+    handleExceptions(providerExceptionHandler) {
+      logRequestResult("akka-http-ogmios") {
+        path("providers"/Segment/"event-types"/Segment/"events"/Segment) {
+          (provId, evtTypeId, evtId) => {
+            get {
+              complete {
+                readEvent(provId, evtTypeId, evtId)
               }
             }
           }
@@ -248,7 +312,7 @@ trait ProviderService extends Protocols with ConfigCassandraCluster with Cassand
 
     readProvider(provId).map(
       provider => {
-        val iter = session.execute(readAllTypesStmt.bind().setString(COL_EVT_PROV, provId)).iterator()
+        val iter = session.execute(readAllTypesStmt.bind().setString(COL_EVT_TYPE_PROV, provId)).iterator()
         createEventList(iter, List())
       }
     )
@@ -259,35 +323,35 @@ trait ProviderService extends Protocols with ConfigCassandraCluster with Cassand
     if (!iter.hasNext) acc
     else {
       val row = iter.next()
-      val evt = new EventType(row.getString(COL_EVT_ID), Option(row.getString(COL_EVT_UNIT)), row.getString(COL_EVT_TYPE), row.getString(COL_EVT_PROV),  Option(DateTime(row.getDate(COL_EVT_REG).getTime)))
+      val evt = new EventType(row.getString(COL_EVT_TYPE_ID), Option(row.getString(COL_EVT_TYPE_UNIT)), row.getString(COL_EVT_TYPE), row.getString(COL_EVT_TYPE_PROV),  Option(DateTime(row.getDate(COL_EVT_TYPE_REG).getTime)))
       createEventList(iter, evt :: acc)
     }
   }
 
   def deleteEventsFor(provId: String): StatusCode = {
     logger.debug("Delete event types for provider '{}'", provId)
-    val rs = session.execute(deleteAllTypesStmt.bind().setString(COL_EVT_PROV, provId))
+    val rs = session.execute(deleteAllTypesStmt.bind().setString(COL_EVT_TYPE_PROV, provId))
     StatusCodes.NoContent
   }
 
   def deleteEventType(provId: String, evt: String): StatusCode = {
     logger.debug("Delete event '{}' for provider '{}'", evt, provId)
-    val rs = session.execute(deleteEvtTypeStmt.bind().setString(COL_EVT_PROV, provId).setString(COL_EVT_ID, evt))
+    val rs = session.execute(deleteEvtTypeStmt.bind().setString(COL_EVT_TYPE_PROV, provId).setString(COL_EVT_TYPE_ID, evt))
     StatusCodes.NoContent
   }
 
   def readEventType(provId: String, evt: String): Future[EventType] = {
     logger.debug("Read event '{}' for provider '{}'", evt, provId)
-    toFuture(session.executeAsync(readEvtTypeStmt.bind().setString(COL_EVT_PROV, provId).setString(COL_EVT_ID, evt)))
+    toFuture(session.executeAsync(readEvtTypeStmt.bind().setString(COL_EVT_TYPE_PROV, provId).setString(COL_EVT_TYPE_ID, evt)))
       .map(rs => {
       Option(rs.one()).map(row => {
-        new EventType(row.getString(COL_EVT_ID), Option(row.getString(COL_EVT_UNIT)), row.getString(COL_EVT_TYPE), row.getString(COL_EVT_PROV),  Option(DateTime(row.getDate(COL_EVT_REG).getTime)))
+        new EventType(row.getString(COL_EVT_TYPE_ID), Option(row.getString(COL_EVT_TYPE_UNIT)), row.getString(COL_EVT_TYPE), row.getString(COL_EVT_TYPE_PROV),  Option(DateTime(row.getDate(COL_EVT_TYPE_REG).getTime)))
       }
       ).getOrElse(throw new EventTypeNotFound("EventType " + evt + " doesn't exist for the provider " + provId))
     })
   }
 
-  def createEvent(provId: String, evtId: String, event: EventType): Future[StatusCode] = {
+  def createEventType(provId: String, evtId: String, event: EventType): Future[StatusCode] = {
     if (logger.isDebugEnabled) logger.debug("Creation of event '{}' for provider '{}'", evtId, provId)
 
     if (event.provider != provId) {
@@ -304,10 +368,10 @@ trait ProviderService extends Protocols with ConfigCassandraCluster with Cassand
     readProvider(provId).map(
       p => {
         val rs = session.execute(insertEvtTypeStmt.bind()
-          .setString(COL_EVT_ID, evtId)
-          .setString(COL_EVT_PROV, provId)
-          .setDate(COL_EVT_REG, new Date(LocalDateTime.parse(event.creationDate.getOrElse(DateTime.now).toIsoDateTimeString()).toInstant(ZoneOffset.UTC).toEpochMilli)) // ugly...
-          .setString(COL_EVT_UNIT, event.unit.orNull).setString(COL_EVT_TYPE, event.valueType))
+          .setString(COL_EVT_TYPE_ID, evtId)
+          .setString(COL_EVT_TYPE_PROV, provId)
+          .setDate(COL_EVT_TYPE_REG, new Date(LocalDateTime.parse(event.creationDate.getOrElse(DateTime.now).toIsoDateTimeString()).toInstant(ZoneOffset.UTC).toEpochMilli)) // ugly...
+          .setString(COL_EVT_TYPE_UNIT, event.unit.orNull).setString(COL_EVT_TYPE, event.valueType))
 
         if (rs.wasApplied()) StatusCodes.Created
         else {
@@ -315,5 +379,39 @@ trait ProviderService extends Protocols with ConfigCassandraCluster with Cassand
           StatusCodes.Conflict
         }
       })
+  }
+
+  // -----------------------------------
+  // Method for the Events resource
+  // -----------------------------------
+
+  def createEvent(provId: String, evtId: String, event: Event): Future[StatusCode] = {
+    if (logger.isDebugEnabled) logger.debug("Creation of event '{}' for provider '{}' and event-type '{}'", event.id, provId, evtId)
+
+    // test if the event-type has been declared before inserting the new event
+    readEventType(provId, evtId).map(
+      et => {
+        val now = LocalDateTime.now
+        session.execute(insertEvtStmt.bind()
+          .setUUID(COL_EVT_ID, java.util.UUID.fromString(event.id.get))
+          .setString(COL_EVT_ETID, evtId)
+          .setString(COL_EVT_PROV, provId)
+          .setDate(COL_EVT_TYPE_REG, new Date(now.toInstant(ZoneOffset.UTC).toEpochMilli))
+          .setString(COL_EVT_VALUE, event.value))
+
+        StatusCodes.Created
+      })
+  }
+
+
+  def readEvent(provId: String, evttype: String, evt: String): Future[Event] = {
+    logger.debug("Read event '{}' for provider '{}' and event-type '{}'", evt, provId, evttype)
+    toFuture(session.executeAsync(readEvtStmt.bind().setString(COL_EVT_PROV, provId).setString(COL_EVT_ETID, evttype).setString(COL_EVT_ID, evt)))
+      .map(rs => {
+      Option(rs.one()).map(row => {
+        new Event(Option(row.getUUID(COL_EVT_ID).toString), row.getString(COL_EVT_VALUE),  Option(DateTime(row.getDate(COL_EVT_REG).getTime)))
+      }
+      ).getOrElse(throw new EventNotFound("Event " + evt + " doesn't exist for the provider " + provId))
+    })
   }
 }

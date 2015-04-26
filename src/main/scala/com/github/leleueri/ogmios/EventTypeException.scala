@@ -5,3 +5,5 @@ package com.github.leleueri.ogmios
  */
 class EventTypeNotFound(message: String) extends RuntimeException(message)
 class EventTypeInvalid(message: String) extends RuntimeException(message)
+
+class EventNotFound(message: String) extends RuntimeException(message)

@@ -21,7 +21,8 @@ object OgmiosApp extends App with ProviderService with RouteConcatenation {
   val keyspace = "ogmios"
   lazy val session = cluster.connect(keyspace)
 
-  val routes = allEventTypeRoutes ~ eventTypeRoutes ~ providerRoutes
+  val routes = allEventTypeRoutes ~ eventTypeRoutes ~ providerRoutes ~ eventRoutes ~ eventsRoutes
+
 
   Http().bindAndHandle(interface = config.getString("http.interface"), port = config.getInt("http.port"), handler = routes)
 }
