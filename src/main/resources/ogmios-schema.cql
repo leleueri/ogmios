@@ -27,4 +27,5 @@ evttype varchar,
 registration timestamp,
 value varchar,
 PRIMARY KEY (provid, evttype, id)
-);
+) WITH default_time_to_live = 16070400;
+-- TTL set to around 6 months

@@ -159,19 +159,18 @@ trait ProviderService extends Protocols with ConfigCassandraCluster with Cassand
       logRequestResult("akka-http-ogmios") {
         path("providers"/Segment/"event-types"/Segment) {
           (provId, evtId) => {
-            post {
+            put {
               entity(as[EventType]) {
                 event =>
                   complete {
                     createEventType(provId, evtId, event)
                   }
               }
-            } ~
-              get {
-                complete {
-                  readEventType(provId, evtId)
-                }
-              } ~ delete {
+            } ~ get {
+              complete {
+                readEventType(provId, evtId)
+              }
+            } ~ delete {
               complete {
                 Future[StatusCode] {
                   deleteEventType(provId, evtId)
@@ -190,25 +189,24 @@ trait ProviderService extends Protocols with ConfigCassandraCluster with Cassand
       logRequestResult("akka-http-ogmios") {
         path("providers" / Segment / "event-types" / Segment / "events") {
           (provId, evtTypeId) => {
-            put {
+            post {
               entity(as[Event]) {
                 event =>
                   val timeuuid = new com.eaio.uuid.UUID().toString
-                  respondWithHeader(Location(s"providers/$provId/event-types/$evtTypeId/events/$timeuuid")) {
+                  respondWithHeader(Location(s"/providers/$provId/event-types/$evtTypeId/events/$timeuuid")) {
                     complete {
-                      createEvent(provId, evtTypeId, event.copy(id = Some(timeuuid)))
+                      createEvent(provId, evtTypeId, event.copy(id = Some(timeuuid))) // TODO manage TTL
                     }
                   }
               }
-            } ~
-              get {
-                complete {
-                  readEventType(provId, evtTypeId) // TODO
-                }
-              } ~ delete {
+            } ~ get {
+              complete {
+                readAllEvents(provId, evtTypeId)
+              }
+            } ~ delete {
               complete {
                 Future[StatusCode] {
-                  deleteEventType(provId, evtTypeId) // TODO
+                  deleteAllEvents(provId, evtTypeId)
                 }
               }
             }
@@ -313,18 +311,18 @@ trait ProviderService extends Protocols with ConfigCassandraCluster with Cassand
     readProvider(provId).map(
       provider => {
         val iter = session.execute(readAllTypesStmt.bind().setString(COL_EVT_TYPE_PROV, provId)).iterator()
-        createEventList(iter, List())
+        createEventTypeList(iter, List())
       }
     )
   }
 
   @tailrec
-  final def createEventList(iter : java.util.Iterator[Row], acc : List[EventType]) : List[EventType] = {
+  final def createEventTypeList(iter : java.util.Iterator[Row], acc : List[EventType]) : List[EventType] = {
     if (!iter.hasNext) acc
     else {
       val row = iter.next()
       val evt = new EventType(row.getString(COL_EVT_TYPE_ID), Option(row.getString(COL_EVT_TYPE_UNIT)), row.getString(COL_EVT_TYPE), row.getString(COL_EVT_TYPE_PROV),  Option(DateTime(row.getDate(COL_EVT_TYPE_REG).getTime)))
-      createEventList(iter, evt :: acc)
+      createEventTypeList(iter, evt :: acc)
     }
   }
 
@@ -403,7 +401,6 @@ trait ProviderService extends Protocols with ConfigCassandraCluster with Cassand
       })
   }
 
-
   def readEvent(provId: String, evttype: String, evt: String): Future[Event] = {
     logger.debug("Read event '{}' for provider '{}' and event-type '{}'", evt, provId, evttype)
     toFuture(session.executeAsync(readEvtStmt.bind().setString(COL_EVT_PROV, provId).setString(COL_EVT_ETID, evttype).setString(COL_EVT_ID, evt)))
@@ -413,5 +410,32 @@ trait ProviderService extends Protocols with ConfigCassandraCluster with Cassand
       }
       ).getOrElse(throw new EventNotFound("Event " + evt + " doesn't exist for the provider " + provId))
     })
+  }
+
+  def deleteAllEvents(provId: String, evt: String): StatusCode = {
+    logger.debug("Delete events for provider '{}' and event-type '{}'", provId, evt)
+    val rs = session.execute(deleteAllEventsStmt.bind().setString(COL_EVT_PROV, provId).setString(COL_EVT_ETID, evt))
+    StatusCodes.NoContent
+  }
+
+  def readAllEvents(provId: String, evt: String): Future[List[Event]] = {
+    logger.debug("Read events for provider '{}' and event-type '{}'", provId, evt)
+
+      readEventType(provId, evt).map {
+        provider => {
+          val iter = session.execute(readAllEventsStmt.bind().setString(COL_EVT_PROV, provId).setString(COL_EVT_ETID, evt)).iterator()
+          createEventsList(iter, List())
+        }
+      }
+  }
+
+  @tailrec
+  final def createEventsList(iter : java.util.Iterator[Row], acc : List[Event]) : List[Event] = {
+    if (!iter.hasNext) acc
+    else {
+      val row = iter.next()
+      val evt = new Event(Option(row.getUUID(COL_EVT_ID).toString), row.getString(COL_EVT_VALUE), Option(DateTime(row.getDate(COL_EVT_REG).getTime)))
+      createEventsList(iter, evt :: acc)
+    }
   }
 }

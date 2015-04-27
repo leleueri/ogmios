@@ -1,5 +1,7 @@
 package com.github.leleueri.ogmios
 
+import java.util.UUID
+
 import akka.event.NoLogging
 import akka.http.marshallers.sprayjson.SprayJsonSupport._
 import akka.http.model.ContentTypes._
@@ -22,7 +24,7 @@ class TestProviderService extends FlatSpec with Matchers with ScalatestRouteTest
   val keyspace = "ogmios"
   lazy val session = cluster.connect(keyspace)
 
-  val providerOneId = "providerid-"+System.currentTimeMillis()
+  val providerOneId = "providerid-"+UUID.randomUUID().toString
   val providerOneBean = new Provider(providerOneId, "name-"+providerOneId, None, Set.empty, None)
 
   override def afterEach() {

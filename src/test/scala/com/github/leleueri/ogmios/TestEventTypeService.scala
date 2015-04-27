@@ -1,5 +1,7 @@
 package com.github.leleueri.ogmios
 
+import java.util.UUID
+
 import akka.event.{Logging, NoLogging}
 import akka.http.model.ContentTypes._
 import akka.http.model.StatusCodes._
@@ -18,11 +20,11 @@ class TestEventTypeService extends FlatSpec with Matchers with ScalatestRouteTes
   val keyspace = "ogmios"
   lazy val session = cluster.connect(keyspace)
 
-  val providerOneId = "providerid-inevent-"+System.currentTimeMillis()
+  val providerOneId = "providerid-"+UUID.randomUUID().toString
   val providerOneBean = new Provider(providerOneId, "name-"+providerOneId, None, Set.empty, None)
 
-  val firstEventId: String = "firstEventId" + System.currentTimeMillis()
-  val secondEventId: String = "secondEventId" + System.currentTimeMillis()
+  val firstEventId: String = "firstEventId"+UUID.randomUUID().toString
+  val secondEventId: String = "secondEventId"+UUID.randomUUID().toString
   val firstEvent = new EventType(firstEventId, None, "int", providerOneId, None)
   val secondEvent = new EventType(secondEventId, Some("ms"), "int", providerOneId, None)
 
